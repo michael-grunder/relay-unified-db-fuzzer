@@ -45,9 +45,10 @@ final class CliServerModeExecutor
             $this->shutdownServer($server);
             throw new \RuntimeException('PHP built-in server did not become ready');
         }
-        if (!$this->sanityCheckServer()) {
+        $sanity = $this->sanityCheckServer();
+        if (!$sanity['ok']) {
             $this->shutdownServer($server);
-            throw new \RuntimeException('CLI server sanity check failed');
+            throw new \RuntimeException($this->formatSanityCheckFailure($sanity));
         }
 
         $failures = 0;
@@ -153,7 +154,16 @@ final class CliServerModeExecutor
         return false;
     }
 
-    private function sanityCheckServer(): bool
+    /**
+     * @return array{
+     *     ok: bool,
+     *     endpoint: string,
+     *     message: ?string,
+     *     trace: ?string,
+     *     response: ?string
+     * }
+     */
+    private function sanityCheckServer(): array
     {
         $query = http_build_query([
             'host' => $this->redisHost,
@@ -161,6 +171,13 @@ final class CliServerModeExecutor
             'flush' => '1',
         ]);
         $endpoint = $this->endpoint('/check.php') . '?' . $query;
+        $result = [
+            'ok' => false,
+            'endpoint' => $endpoint,
+            'message' => null,
+            'trace' => null,
+            'response' => null,
+        ];
         $context = stream_context_create([
             'http' => [
                 'method' => 'GET',
@@ -172,23 +189,41 @@ final class CliServerModeExecutor
             $this->logger->error('Failed to hit cli-server sanity check endpoint', [
                 'endpoint' => $endpoint,
             ]);
-            return false;
+            $result['message'] = 'Failed to hit cli-server sanity check endpoint';
+            return $result;
         }
 
         $decoded = json_decode($response, true);
-        if (!is_array($decoded) || ($decoded['status'] ?? null) !== 'ok') {
-            $this->logger->error('CLI server sanity check reported failure', [
+        if (!is_array($decoded)) {
+            $this->logger->error('CLI server sanity check returned invalid JSON', [
                 'endpoint' => $endpoint,
                 'response' => $response,
             ]);
-            return false;
+            $result['message'] = 'CLI server sanity check returned invalid JSON';
+            $result['response'] = $response;
+            return $result;
+        }
+
+        if (($decoded['status'] ?? null) !== 'ok') {
+            $this->logger->error('CLI server sanity check reported failure', [
+                'endpoint' => $endpoint,
+                'response' => $response,
+                'message' => $decoded['message'] ?? null,
+                'exception' => $decoded['exception'] ?? null,
+                'trace' => $decoded['trace'] ?? null,
+            ]);
+            $result['message'] = is_string($decoded['message'] ?? null) ? $decoded['message'] : 'CLI server sanity check failed';
+            $result['trace'] = is_string($decoded['trace'] ?? null) ? $decoded['trace'] : null;
+            $result['response'] = $response;
+            return $result;
         }
 
         $this->logger->debug('CLI server sanity check passed', [
             'endpoint' => $endpoint,
             'response' => $decoded,
         ]);
-        return true;
+        $result['ok'] = true;
+        return $result;
     }
 
     private function sendRequest(string $payload, int $worker): bool
@@ -250,5 +285,26 @@ final class CliServerModeExecutor
     private function endpoint(string $path): string
     {
         return sprintf('http://%s:%d%s', $this->host, $this->port, $path);
+    }
+
+    /**
+     * @param array{
+     *     ok: bool,
+     *     endpoint: string,
+     *     message: ?string,
+     *     trace: ?string,
+     *     response: ?string
+     * } $sanity
+     */
+    private function formatSanityCheckFailure(array $sanity): string
+    {
+        $detail = $sanity['message'] ?? 'unknown error';
+        if ($sanity['trace']) {
+            $detail .= "\n" . $sanity['trace'];
+        } elseif ($sanity['response']) {
+            $detail .= "\nResponse: " . $sanity['response'];
+        }
+
+        return sprintf('CLI server sanity check failed: %s', $detail);
     }
 }

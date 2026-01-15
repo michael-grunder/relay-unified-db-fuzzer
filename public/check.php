@@ -41,10 +41,20 @@ try {
         'flushed' => $flush,
     ]);
 } catch (Throwable $e) {
+    $prettyTrace = sprintf(
+        "%s: %s in %s:%d\nStack trace:\n%s",
+        $e::class,
+        $e->getMessage(),
+        $e->getFile(),
+        $e->getLine(),
+        $e->getTraceAsString()
+    );
     $logger->error('Sanity check error', ['exception' => $e]);
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
         'message' => $e->getMessage(),
+        'exception' => $e::class,
+        'trace' => $prettyTrace,
     ]);
 }
