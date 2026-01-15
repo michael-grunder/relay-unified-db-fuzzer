@@ -8,7 +8,7 @@ This repository contains a deterministic workload generator that hammers the Rel
 
 ## Requirements
 
-- PHP 8.2+ CLI with the [Relay](https://github.com/cachewerk/relay) extension enabled in the supplied `php.ini`
+- PHP 8.2+ CLI with the [Relay](https://github.com/cachewerk/relay) extension enabled (via `php.ini` or compiled-in)
 - `pcntl` and `posix` extensions when using `--mode=fork`
 - Ability to launch the PHP built-in server (for `--mode=cli-server`)
 - Composer (run `composer install` after cloning) and any system dependencies the Relay extension needs in order to reach your target datastore
@@ -37,9 +37,9 @@ Common flags used by both `fuzzer` and `runner`:
 | Flag | Description |
 |------|-------------|
 | `--php` | Path to the PHP binary to run worker code and (optionally) the built-in server |
-| `--php-ini` | php.ini that enables the Relay extension and configures your unified DB |
+| `--php-ini` | Optional php.ini that enables the Relay extension and configures your unified DB |
 | `--ops` | Number of operations per worker in a single run |
-| `--workers` | Number of worker payloads to build. Fork mode spawns this many processes; CLI server mode posts each worker sequentially |
+| `--workers` | Number of worker payloads to build (default 1). Fork mode spawns this many processes; CLI server mode posts each worker sequentially |
 | `--mode` | `fork` (pcntl workers) or `cli-server` (HTTP POST to `public/fuzz.php`) |
 | `--commands` | Comma-separated allowlist. Values can be families (`string`, `hash`, `list`, `set`, `zset`) or individual commands (see below) |
 | `--seed` | Deterministic seed. `fuzzer` will derive a per-run seed from it so failures reproduce |

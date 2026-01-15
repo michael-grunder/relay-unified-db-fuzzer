@@ -11,7 +11,7 @@ final class RunnerOptions
      */
     public function __construct(
         public readonly string $phpBinary,
-        public readonly string $phpIni,
+        public readonly ?string $phpIni,
         public readonly int $ops,
         public readonly int $workers,
         public readonly int $seed,

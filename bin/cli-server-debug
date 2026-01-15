@@ -14,7 +14,7 @@ function usage(): void
 Debug cli-server bootstrap
 
 Usage:
-  bin/cli-server-debug --php <path> --php-ini <path> --workers <int> [options]
+  bin/cli-server-debug --php <path> [--workers <int>] [options]
 
 Options:
   --host <host>           CLI server host (default 127.0.0.1)
@@ -23,28 +23,68 @@ Options:
   --redis-port <port>     Redis port (default 6379)
   --log-level <level>     Log verbosity for endpoint (default info)
   --document-root <dir>   Document root (default ./public)
+  --php-ini <path>        Optional php.ini to pass through
 
 TXT);
 }
 
-function waitForServerReady(string $host, int $port): bool
+function resolvePath(string $path, string $baseDir): string
+{
+    if ($path === '' || str_starts_with($path, '/')) {
+        return $path;
+    }
+
+    $candidate = $baseDir . '/' . $path;
+    $real = realpath($candidate);
+    return $real !== false ? $real : $candidate;
+}
+
+function formatProcessFailure(Process $process): string
+{
+    $exitCode = $process->getExitCode();
+    $signal = $process->getTermSignal();
+    $stderr = trim($process->getErrorOutput());
+    $stdout = trim($process->getOutput());
+    $message = sprintf(
+        'CLI server failed to start (exit code: %s, signal: %s).',
+        $exitCode === null ? 'n/a' : (string)$exitCode,
+        $signal === null ? 'n/a' : (string)$signal
+    );
+    $details = [];
+    if ($stderr !== '') {
+        $details[] = 'stderr: ' . $stderr;
+    }
+    if ($stdout !== '') {
+        $details[] = 'stdout: ' . $stdout;
+    }
+    if ($details === []) {
+        return $message;
+    }
+
+    return $message . ' ' . implode(' ', $details);
+}
+
+function waitForServerReady(Process $process, string $host, int $port): void
 {
     $attempts = 0;
     $maxAttempts = 30;
     $sleepUsec = 100000;
 
     while ($attempts < $maxAttempts) {
+        if (!$process->isRunning()) {
+            throw new RuntimeException(formatProcessFailure($process));
+        }
         $fp = @fsockopen($host, $port, $errno, $errstr, 0.1);
         if ($fp) {
             fclose($fp);
-            return true;
+            return;
         }
 
         usleep($sleepUsec);
         $attempts++;
     }
 
-    return false;
+    throw new RuntimeException(sprintf('CLI server did not become ready at %s:%d', $host, $port));
 }
 
 try {
@@ -55,14 +95,21 @@ try {
     }
 
     $php = $parser->require('php');
-    $phpIni = $parser->require('php-ini');
-    $workers = $parser->requireInt('workers');
+    $phpIni = $parser->get('php-ini');
+    $workers = $parser->optionalInt('workers', 1) ?? 1;
     $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
     $port = (int)($parser->get('port', '8080') ?? '8080');
     $redisHost = $parser->get('redis-host', 'localhost') ?? 'localhost';
     $redisPort = (int)($parser->get('redis-port', '6379') ?? '6379');
     $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
     $documentRoot = $parser->get('document-root', dirname(__DIR__) . '/public') ?? dirname(__DIR__) . '/public';
+
+    $cwd = getcwd() ?: dirname(__DIR__);
+    $php = resolvePath($php, $cwd);
+    if ($phpIni !== null) {
+        $phpIni = resolvePath($phpIni, $cwd);
+    }
+    $documentRoot = resolvePath($documentRoot, $cwd);
 
     $cmd = [$php];
     if ($phpIni !== null) {
@@ -105,9 +152,7 @@ try {
     fwrite(STDOUT, sprintf("Fuzz endpoint: http://%s:%d/fuzz.php?%s\n", $host, $port, $query));
     fwrite(STDOUT, sprintf("Sanity endpoint: http://%s:%d/check.php?%s\n", $host, $port, $checkQuery));
 
-    if (!waitForServerReady($host, $port)) {
-        throw new RuntimeException(sprintf('CLI server did not become ready at %s:%d', $host, $port));
-    }
+    waitForServerReady($process, $host, $port);
 
     fwrite(STDOUT, "CLI server is ready. Press Ctrl+C to stop.\n");
 

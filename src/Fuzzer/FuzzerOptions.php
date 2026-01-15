@@ -16,7 +16,7 @@ final class FuzzerOptions
      */
     public function __construct(
         public readonly string $phpBinary,
-        public readonly string $phpIni,
+        public readonly ?string $phpIni,
         public readonly int $ops,
         public readonly int $runs,
         public readonly int $workers,

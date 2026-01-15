@@ -161,17 +161,21 @@ final class FuzzerApplication
     {
         $cmd = [
             $this->options->phpBinary,
-            '-c',
-            $this->options->phpIni,
-            $this->runnerScript,
-            '--php=' . $this->options->phpBinary,
-            '--php-ini=' . $this->options->phpIni,
-            '--ops=' . $this->options->ops,
-            '--workers=' . $this->options->workers,
-            '--mode=' . $this->options->mode,
-            '--seed=' . $runSeed,
-            '--artifact-dir=' . $runDir,
         ];
+        if ($this->options->phpIni !== null) {
+            $cmd[] = '-c';
+            $cmd[] = $this->options->phpIni;
+        }
+        $cmd[] = $this->runnerScript;
+        $cmd[] = '--php=' . $this->options->phpBinary;
+        if ($this->options->phpIni !== null) {
+            $cmd[] = '--php-ini=' . $this->options->phpIni;
+        }
+        $cmd[] = '--ops=' . $this->options->ops;
+        $cmd[] = '--workers=' . $this->options->workers;
+        $cmd[] = '--mode=' . $this->options->mode;
+        $cmd[] = '--seed=' . $runSeed;
+        $cmd[] = '--artifact-dir=' . $runDir;
 
         if ($this->options->commands !== []) {
             $cmd[] = '--commands=' . implode(',', $this->options->commands);

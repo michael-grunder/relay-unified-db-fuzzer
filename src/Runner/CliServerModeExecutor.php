@@ -42,9 +42,11 @@ final class CliServerModeExecutor
         $server = $this->bootServer();
         $pid = $server->getPid() ?: 0;
 
-        if (!$this->waitForServerReady()) {
+        try {
+            $this->waitForServerReady($server);
+        } catch (\RuntimeException $e) {
             $this->shutdownServer($server);
-            throw new \RuntimeException('PHP built-in server did not become ready');
+            throw $e;
         }
         if ($this->holdOpen) {
             $this->logger->warning('CLI server hold enabled; leaving server running for inspection', [
@@ -142,18 +144,26 @@ final class CliServerModeExecutor
         return $chunks;
     }
 
-    private function waitForServerReady(): bool
+    private function waitForServerReady(Process $process): void
     {
         $attempts = 0;
         $maxAttempts = 30;
         $sleepUsec = 100000;
 
         while ($attempts < $maxAttempts) {
+            if (!$process->isRunning()) {
+                $detail = $this->formatProcessFailure($process);
+                $this->logger->error('CLI server exited during startup', [
+                    'attempts' => $attempts,
+                    'detail' => $detail,
+                ]);
+                throw new \RuntimeException($detail);
+            }
             $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 0.1);
             if ($fp) {
                 fclose($fp);
                 $this->logger->debug('CLI server ready', ['attempts' => $attempts + 1]);
-                return true;
+                return;
             }
 
             usleep($sleepUsec);
@@ -165,7 +175,11 @@ final class CliServerModeExecutor
             'host' => $this->host,
             'port' => $this->port,
         ]);
-        return false;
+        throw new \RuntimeException(sprintf(
+            'CLI server did not become ready at %s:%d',
+            $this->host,
+            $this->port
+        ));
     }
 
     private function holdServerOpen(Process $process): void
@@ -345,5 +359,30 @@ final class CliServerModeExecutor
         }
 
         return sprintf('CLI server sanity check failed: %s', $detail);
+    }
+
+    private function formatProcessFailure(Process $process): string
+    {
+        $exitCode = $process->getExitCode();
+        $signal = $process->getTermSignal();
+        $stderr = trim($process->getErrorOutput());
+        $stdout = trim($process->getOutput());
+        $message = sprintf(
+            'CLI server failed to start (exit code: %s, signal: %s).',
+            $exitCode === null ? 'n/a' : (string)$exitCode,
+            $signal === null ? 'n/a' : (string)$signal
+        );
+        $details = [];
+        if ($stderr !== '') {
+            $details[] = 'stderr: ' . $stderr;
+        }
+        if ($stdout !== '') {
+            $details[] = 'stdout: ' . $stdout;
+        }
+        if ($details === []) {
+            return $message;
+        }
+
+        return $message . ' ' . implode(' ', $details);
     }
 }

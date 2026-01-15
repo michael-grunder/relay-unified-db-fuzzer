@@ -15,7 +15,7 @@ function usage(): void
 Relay shared cache fuzzer
 
 Usage:
-  ./fuzzer --php <path> --php-ini <path> --ops <int> --runs <int> --workers <int> --mode <fork|cli-server> [options]
+  ./fuzzer --php <path> --ops <int> --runs <int> [--workers <int>] --mode <fork|cli-server> [options]
 
 Options:
   --commands <csv>        CSV of command families or specific commands to allow
@@ -27,8 +27,20 @@ Options:
   --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
   --log-level <level>     Log verbosity (debug, info, notice, warning, error)
   --cli-server-hold       Start cli-server and wait indefinitely after boot
+  --php-ini <path>        Optional php.ini to pass through
 
 TXT);
+}
+
+function resolvePath(string $path, string $baseDir): string
+{
+    if ($path === '' || str_starts_with($path, '/')) {
+        return $path;
+    }
+
+    $candidate = $baseDir . '/' . $path;
+    $real = realpath($candidate);
+    return $real !== false ? $real : $candidate;
 }
 
 try {
@@ -39,13 +51,19 @@ try {
     }
 
     $php = $parser->require('php');
-    $phpIni = $parser->require('php-ini');
+    $phpIni = $parser->get('php-ini');
     $ops = $parser->requireInt('ops');
     $runs = $parser->requireInt('runs');
-    $workers = $parser->requireInt('workers');
+    $workers = $parser->optionalInt('workers', 1) ?? 1;
     $mode = strtolower($parser->require('mode'));
     if (!in_array($mode, ['fork', 'cli-server'], true)) {
         throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
+    }
+
+    $cwd = getcwd() ?: __DIR__;
+    $php = resolvePath($php, $cwd);
+    if ($phpIni !== null) {
+        $phpIni = resolvePath($phpIni, $cwd);
     }
 
     $commands = array_map('strtolower', $parser->csv('commands'));

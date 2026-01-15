@@ -12,18 +12,30 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
 try {
     $parser = new ArgvParser($_SERVER['argv']);
     if ($parser->has('help')) {
-        fwrite(STDERR, "Usage: runner --php <path> --php-ini <path> --ops <int> --seed <int> --workers <int> --mode <fork|cli-server> [--redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold]\n");
+        fwrite(STDERR, "Usage: runner --php <path> --ops <int> --seed <int> [--workers <int>] --mode <fork|cli-server> [--php-ini <path> --redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold]\n");
         exit(0);
     }
 
     $php = $parser->require('php');
-    $phpIni = $parser->require('php-ini');
+    $phpIni = $parser->get('php-ini');
     $ops = $parser->requireInt('ops');
     $seed = $parser->requireInt('seed');
-    $workers = $parser->requireInt('workers');
+    $workers = $parser->optionalInt('workers', 1) ?? 1;
     $mode = strtolower($parser->require('mode'));
     if (!in_array($mode, ['fork', 'cli-server'], true)) {
         throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
+    }
+
+    $cwd = getcwd() ?: __DIR__;
+    if (!str_starts_with($php, '/')) {
+        $candidate = $cwd . '/' . $php;
+        $real = realpath($candidate);
+        $php = $real !== false ? $real : $candidate;
+    }
+    if ($phpIni !== null && !str_starts_with($phpIni, '/')) {
+        $candidate = $cwd . '/' . $phpIni;
+        $real = realpath($candidate);
+        $phpIni = $real !== false ? $real : $candidate;
     }
 
     $commands = array_map('strtolower', $parser->csv('commands'));
