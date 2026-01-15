@@ -45,6 +45,10 @@ final class CliServerModeExecutor
             $this->shutdownServer($server);
             throw new \RuntimeException('PHP built-in server did not become ready');
         }
+        if (!$this->sanityCheckServer()) {
+            $this->shutdownServer($server);
+            throw new \RuntimeException('CLI server sanity check failed');
+        }
 
         $failures = 0;
         $requestPayloads = $this->chunkRequests($payload);
@@ -147,6 +151,44 @@ final class CliServerModeExecutor
             'port' => $this->port,
         ]);
         return false;
+    }
+
+    private function sanityCheckServer(): bool
+    {
+        $query = http_build_query([
+            'host' => $this->redisHost,
+            'port' => $this->redisPort,
+            'flush' => '1',
+        ]);
+        $endpoint = $this->endpoint('/check.php') . '?' . $query;
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 5,
+            ],
+        ]);
+        $response = @file_get_contents($endpoint, false, $context);
+        if ($response === false) {
+            $this->logger->error('Failed to hit cli-server sanity check endpoint', [
+                'endpoint' => $endpoint,
+            ]);
+            return false;
+        }
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded) || ($decoded['status'] ?? null) !== 'ok') {
+            $this->logger->error('CLI server sanity check reported failure', [
+                'endpoint' => $endpoint,
+                'response' => $response,
+            ]);
+            return false;
+        }
+
+        $this->logger->debug('CLI server sanity check passed', [
+            'endpoint' => $endpoint,
+            'response' => $decoded,
+        ]);
+        return true;
     }
 
     private function sendRequest(string $payload, int $worker): bool
