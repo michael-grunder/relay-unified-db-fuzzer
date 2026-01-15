@@ -30,6 +30,7 @@ Options:
   --rr                    Run the target under rr and capture traces on crash signals
   --rr-trace-dir <dir>    Base directory for rr traces (default per-run artifact dir)
   --php-ini <path>        Optional php.ini to pass through
+  --runs <int>            Number of runs; negative means unlimited
 
 TXT);
 }

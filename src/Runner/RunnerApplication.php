@@ -91,6 +91,13 @@ final class RunnerApplication
         }
 
         $rrTraceDir = $this->finalizeRrTrace($artifactDir, $result['crash_signals']);
+        $relayStats = $this->captureRelayStats($result);
+        $relayStatsPath = null;
+        if ($relayStats !== null) {
+            $relayStatsPath = $artifactDir . '/relay-stats.json';
+            file_put_contents($relayStatsPath, json_encode($relayStats, JSON_PRETTY_PRINT));
+            $this->logRelayStats($relayStats);
+        }
         $summary = [
             'mode' => $this->options->mode,
             'seed' => $this->options->seed,
@@ -100,6 +107,8 @@ final class RunnerApplication
             'payload_bin' => $payloadBin,
             'payload_json' => $payloadJson,
             'rr_trace_dir' => $rrTraceDir,
+            'relay_stats_path' => $relayStatsPath,
+            'relay_stats' => $relayStats,
             'error' => $error,
             'error_class' => $errorClass,
             'error_trace' => $errorTrace,
@@ -117,7 +126,7 @@ final class RunnerApplication
 
     /**
      * @param array<string, mixed> $payload
-     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>, relay_stats?:array<string, mixed>}
      */
     private function runForkMode(array $payload): array
     {
@@ -275,5 +284,48 @@ final class RunnerApplication
             }
         }
         @rmdir($path);
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>|null
+     */
+    private function captureRelayStats(array $result): ?array
+    {
+        $relayStats = $result['relay_stats'] ?? null;
+        if (is_array($relayStats)) {
+            return $relayStats;
+        }
+
+        if (!class_exists(\Relay\Relay::class)) {
+            return null;
+        }
+
+        try {
+            $stats = \Relay\Relay::stats();
+            return is_array($stats) ? $stats : null;
+        } catch (\Throwable $t) {
+            $this->logger->warning('Failed to capture relay stats', [
+                'exception' => $t,
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $relayStats
+     */
+    private function logRelayStats(array $relayStats): void
+    {
+        $usage = is_array($relayStats['usage'] ?? null) ? $relayStats['usage'] : [];
+        $stats = is_array($relayStats['stats'] ?? null) ? $relayStats['stats'] : [];
+
+        $this->logger->info('Relay cache stats', [
+            'usage_total_requests' => $usage['total_requests'] ?? null,
+            'usage_max_active_requests' => $usage['max_active_requests'] ?? null,
+            'stats_hits' => $stats['hits'] ?? null,
+            'stats_misses' => $stats['misses'] ?? null,
+        ]);
     }
 }

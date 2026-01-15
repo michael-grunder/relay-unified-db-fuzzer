@@ -35,9 +35,11 @@ final class FuzzerApplication
 
     public function run(): int
     {
+        $runLimit = $this->options->runs;
+        $runLabel = $runLimit < 0 ? 'unlimited' : $runLimit;
         $this->logger->info('Starting fuzzer run', [
             'master_seed' => $this->masterSeed,
-            'runs' => $this->options->runs,
+            'runs' => $runLabel,
             'ops' => $this->options->ops,
             'workers' => $this->options->workers,
             'mode' => $this->options->mode,
@@ -45,7 +47,7 @@ final class FuzzerApplication
             'commands' => $this->options->commands,
         ]);
         $failures = 0;
-        for ($runIndex = 0; $runIndex < $this->options->runs; $runIndex++) {
+        for ($runIndex = 0; $runLimit < 0 || $runIndex < $runLimit; $runIndex++) {
             $runSeed = SeedUtil::derive($this->masterSeed, $runIndex);
             $result = $this->runSingle($runIndex, $runSeed);
             if ($result) {
@@ -54,7 +56,7 @@ final class FuzzerApplication
         }
 
         $this->logger->info('Completed fuzzer runs', [
-            'runs' => $this->options->runs,
+            'runs' => $runLabel,
             'failures' => $failures,
         ]);
 

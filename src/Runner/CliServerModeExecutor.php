@@ -30,7 +30,7 @@ final class CliServerModeExecutor
      *     meta: array<string, int|string>,
      *     workers: list<array{worker:int, operations:list<array{op:int, cmd:string, args:array}>}>
      * } $payload
-     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>, relay_stats:?array<string, mixed>}
      */
     public function run(array $payload): array
     {
@@ -61,6 +61,7 @@ final class CliServerModeExecutor
                 'pids' => $pid > 0 ? [$pid] : [],
                 'failures' => 0,
                 'crash_signals' => $this->captureCrashSignals($server),
+                'relay_stats' => null,
             ];
         }
 
@@ -89,12 +90,14 @@ final class CliServerModeExecutor
             }
         }
 
+        $relayStats = $this->fetchRelayStats();
         $this->shutdownServer($server);
 
         return [
             'pids' => $pid > 0 ? [$pid] : [],
             'failures' => $failures,
             'crash_signals' => $this->captureCrashSignals($server),
+            'relay_stats' => $relayStats,
         ];
     }
 
@@ -311,6 +314,39 @@ final class CliServerModeExecutor
             'response' => $decoded,
         ]);
         return true;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function fetchRelayStats(): ?array
+    {
+        $endpoint = $this->endpoint('/stats.php', $this->buildEndpointQuery());
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 5,
+            ],
+        ]);
+
+        $response = @file_get_contents($endpoint, false, $context);
+        if ($response === false) {
+            $this->logger->warning('Failed to fetch relay stats', [
+                'endpoint' => $endpoint,
+            ]);
+            return null;
+        }
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded)) {
+            $this->logger->warning('Relay stats endpoint returned invalid JSON', [
+                'endpoint' => $endpoint,
+                'response' => $response,
+            ]);
+            return null;
+        }
+
+        return $decoded;
     }
 
     private function shutdownServer(Process $process): void
