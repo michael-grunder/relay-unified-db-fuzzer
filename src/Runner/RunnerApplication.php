@@ -9,18 +9,25 @@ use Mgrunder\RelayUnifiedDbFuzzer\Payload\KeyGenerator;
 use Mgrunder\RelayUnifiedDbFuzzer\Payload\PayloadEncoder;
 use Mgrunder\RelayUnifiedDbFuzzer\Payload\PayloadGenerator;
 use Mgrunder\RelayUnifiedDbFuzzer\Payload\ValueGenerator;
+use Psr\Log\LoggerInterface;
 
 final class RunnerApplication
 {
     public function __construct(
         private readonly RunnerOptions $options,
         private readonly string $projectRoot,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
     public function run(): int
     {
         $artifactDir = $this->ensureArtifactDir();
+        $this->logger->info('Runner starting', [
+            'artifact_dir' => $artifactDir,
+            'mode' => $this->options->mode,
+            'log_level' => $this->options->logLevel,
+        ]);
         $registry = new CommandRegistry();
         $commandSet = $registry->allowlist($this->options->commands);
         $payloadGenerator = new PayloadGenerator(
@@ -35,6 +42,14 @@ final class RunnerApplication
             $this->options->seed
         );
 
+        $this->logger->info('Generated payload', [
+            'ops' => $this->options->ops,
+            'workers' => $this->options->workers,
+            'seed' => $this->options->seed,
+            'allowed_commands' => $this->options->commands,
+            'total_operations' => $this->countOperations($payload),
+        ]);
+
         $payloadBin = $artifactDir . '/payload.bin';
         $payloadJson = $artifactDir . '/payload.json';
         file_put_contents($payloadBin, PayloadEncoder::toSerialized($payload));
@@ -42,6 +57,8 @@ final class RunnerApplication
 
         $result = ['pids' => [], 'failures' => 0];
         $error = null;
+        $errorClass = null;
+        $errorTrace = null;
 
         try {
             $result = $this->options->mode === 'cli-server'
@@ -49,8 +66,13 @@ final class RunnerApplication
                 : $this->runForkMode($payload);
         } catch (\Throwable $t) {
             $error = $t->getMessage();
+            $errorClass = $t::class;
+            $errorTrace = $t->getTraceAsString();
             $result['failures'] = max(1, $result['failures']);
-            fwrite(STDERR, "Runner error: {$error}\n");
+            $this->logger->error('Runner exception', [
+                'exception' => $t,
+                'mode' => $this->options->mode,
+            ]);
         }
 
         $summary = [
@@ -61,8 +83,16 @@ final class RunnerApplication
             'payload_bin' => $payloadBin,
             'payload_json' => $payloadJson,
             'error' => $error,
+            'error_class' => $errorClass,
+            'error_trace' => $errorTrace,
         ];
         file_put_contents($artifactDir . '/summary.json', json_encode($summary, JSON_PRETTY_PRINT));
+        if ($result['failures'] > 0) {
+            $this->logger->warning('Runner reported failures', [
+                'failures' => $result['failures'],
+                'pids' => $result['pids'],
+            ]);
+        }
 
         return $result['failures'] === 0 && $error === null ? 0 : 1;
     }
@@ -73,7 +103,10 @@ final class RunnerApplication
      */
     private function runForkMode(array $payload): array
     {
-        $executor = new ForkModeExecutor(new RelayFactory($this->options->phpIni));
+        $executor = new ForkModeExecutor(
+            new RelayFactory($this->options->phpIni),
+            $this->logger
+        );
         return $executor->run($payload['workers']);
     }
 
@@ -89,7 +122,9 @@ final class RunnerApplication
             $this->options->host,
             $this->options->port,
             $this->options->workers,
-            $this->options->phpIni
+            $this->options->phpIni,
+            $this->options->logLevel,
+            $this->logger
         );
 
         return $executor->run($payload);
@@ -103,5 +138,18 @@ final class RunnerApplication
         }
 
         return realpath($dir) ?: $dir;
+    }
+
+    /**
+     * @param array{workers:list<array{operations:list<array{op:int, cmd:string, args:array}>}>} $payload
+     */
+    private function countOperations(array $payload): int
+    {
+        $count = 0;
+        foreach ($payload['workers'] as $worker) {
+            $count += count($worker['operations'] ?? []);
+        }
+
+        return $count;
     }
 }

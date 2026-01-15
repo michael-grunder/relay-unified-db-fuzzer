@@ -1,3 +1,5 @@
 /vendor/
 composer
 relay.stub.php
+.fuzzer
+composer-lock.json

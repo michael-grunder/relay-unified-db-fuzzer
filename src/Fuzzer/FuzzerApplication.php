@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mgrunder\RelayUnifiedDbFuzzer\Fuzzer;
 
 use Mgrunder\RelayUnifiedDbFuzzer\Support\SeedUtil;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Process\Process;
 
 final class FuzzerApplication
@@ -17,6 +18,7 @@ final class FuzzerApplication
     public function __construct(
         private readonly FuzzerOptions $options,
         private readonly string $projectRoot,
+        private readonly LoggerInterface $logger,
     ) {
         $this->runnerScript = $projectRoot . '/runner';
         $this->runsDir = $projectRoot . '/.fuzzer/runs';
@@ -33,7 +35,14 @@ final class FuzzerApplication
 
     public function run(): int
     {
-        printf("Master seed: %d\n", $this->masterSeed);
+        $this->logger->info('Starting fuzzer run', [
+            'master_seed' => $this->masterSeed,
+            'runs' => $this->options->runs,
+            'ops' => $this->options->ops,
+            'workers' => $this->options->workers,
+            'mode' => $this->options->mode,
+            'commands' => $this->options->commands,
+        ]);
         $failures = 0;
         for ($runIndex = 0; $runIndex < $this->options->runs; $runIndex++) {
             $runSeed = SeedUtil::derive($this->masterSeed, $runIndex);
@@ -43,11 +52,10 @@ final class FuzzerApplication
             }
         }
 
-        printf(
-            "Completed %d run(s); failures=%d\n",
-            $this->options->runs,
-            $failures
-        );
+        $this->logger->info('Completed fuzzer runs', [
+            'runs' => $this->options->runs,
+            'failures' => $failures,
+        ]);
 
         return $failures > 0 ? 1 : 0;
     }
@@ -63,6 +71,13 @@ final class FuzzerApplication
         $command = $this->buildRunnerCommand($runSeed, $runDir);
         $stdoutFile = $runDir . '/stdout.txt';
         $stderrFile = $runDir . '/stderr.txt';
+
+        $this->logger->debug('Launching runner', [
+            'run' => $runIndex,
+            'seed' => $runSeed,
+            'cmd' => $command,
+            'run_dir' => $runDir,
+        ]);
 
         $process = new Process($command, $this->projectRoot);
         $stdoutHandle = fopen($stdoutFile, 'ab');
@@ -83,9 +98,27 @@ final class FuzzerApplication
         fclose($stderrHandle);
 
         $summaryPath = $runDir . '/summary.json';
-        $summary = is_file($summaryPath)
-            ? json_decode((string)file_get_contents($summaryPath), true)
-            : null;
+        $summary = null;
+        if (is_file($summaryPath)) {
+            $rawSummary = (string)file_get_contents($summaryPath);
+            $decoded = json_decode($rawSummary, true);
+            if (is_array($decoded)) {
+                $summary = $decoded;
+            } else {
+                $this->logger->warning('Failed to decode summary.json', [
+                    'run' => $runIndex,
+                    'seed' => $runSeed,
+                    'path' => $summaryPath,
+                    'raw' => $rawSummary,
+                ]);
+            }
+        } else {
+            $this->logger->warning('Missing summary.json', [
+                'run' => $runIndex,
+                'seed' => $runSeed,
+                'path' => $summaryPath,
+            ]);
+        }
 
         $exitCode = $process->getExitCode();
         $failures = (int)($summary['failures'] ?? 0);
@@ -93,16 +126,28 @@ final class FuzzerApplication
         $coreFiles = $this->collectCoreFiles($pids);
         $hadFailure = ($exitCode !== 0) || $failures > 0 || $coreFiles !== [];
 
-        printf(
-            "[run=%d seed=%d] exit=%d failures=%d cores=%d\n",
-            $runIndex,
-            $runSeed,
-            $exitCode,
-            $failures,
-            count($coreFiles)
-        );
+        $this->logger->info('Run completed', [
+            'run' => $runIndex,
+            'seed' => $runSeed,
+            'exit' => $exitCode,
+            'failures' => $failures,
+            'cores' => count($coreFiles),
+            'error' => $summary['error'] ?? null,
+            'error_class' => $summary['error_class'] ?? null,
+        ]);
 
         if ($hadFailure) {
+            $this->logger->warning('Run failure detected', [
+                'run' => $runIndex,
+                'seed' => $runSeed,
+                'exit' => $exitCode,
+                'failures' => $failures,
+                'cores' => $coreFiles,
+                'summary_path' => $summaryPath,
+                'stderr' => $stderrFile,
+                'error' => $summary['error'] ?? null,
+                'error_class' => $summary['error_class'] ?? null,
+            ]);
             $this->persistReproducer($runIndex, $runSeed, $runDir, $summary ?? [], $command, $coreFiles);
         }
 
@@ -136,6 +181,7 @@ final class FuzzerApplication
             $cmd[] = '--host=' . $this->options->host;
             $cmd[] = '--port=' . $this->options->port;
         }
+        $cmd[] = '--log-level=' . $this->options->logLevel;
 
         return $cmd;
     }

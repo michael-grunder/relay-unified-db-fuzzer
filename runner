@@ -12,7 +12,7 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
 try {
     $parser = new ArgvParser($_SERVER['argv']);
     if ($parser->has('help')) {
-        fwrite(STDERR, "Usage: runner --php <path> --php-ini <path> --ops <int> --seed <int> --workers <int> --mode <fork|cli-server>\n");
+        fwrite(STDERR, "Usage: runner --php <path> --php-ini <path> --ops <int> --seed <int> --workers <int> --mode <fork|cli-server> [--log-level <level>]\n");
         exit(0);
     }
 
@@ -30,6 +30,7 @@ try {
     $artifactDir = $parser->get('artifact-dir');
     $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
     $port = (int)($parser->get('port', '8080') ?? '8080');
+    $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
 
     $options = new RunnerOptions(
         phpBinary: $php,
@@ -42,9 +43,11 @@ try {
         commands: $commands,
         host: $host,
         port: $port,
+        logLevel: $logLevel,
     );
 
-    $app = new RunnerApplication($options, __DIR__);
+    $logger = Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory::create('runner', $logLevel);
+    $app = new RunnerApplication($options, __DIR__, $logger);
     exit($app->run());
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL);

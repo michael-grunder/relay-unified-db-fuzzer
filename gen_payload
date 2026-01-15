@@ -1,0 +1,51 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Mgrunder\RelayUnifiedDbFuzzer\Payload\CommandRegistry;
+use Mgrunder\RelayUnifiedDbFuzzer\Payload\KeyGenerator;
+use Mgrunder\RelayUnifiedDbFuzzer\Payload\PayloadEncoder;
+use Mgrunder\RelayUnifiedDbFuzzer\Payload\PayloadGenerator;
+use Mgrunder\RelayUnifiedDbFuzzer\Payload\ValueGenerator;
+use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
+
+try {
+    $parser = new ArgvParser($_SERVER['argv']);
+    if ($parser->has('help')) {
+        fwrite(STDERR, "Usage: gen_payload --ops <int> --seed <int> [--workers <int>] [--commands <csv>] [--format php-serialize|json] [--out <path>]\n");
+        exit(0);
+    }
+
+    $ops = $parser->requireInt('ops');
+    $seed = $parser->requireInt('seed');
+    $workers = $parser->optionalInt('workers', 1) ?? 1;
+    $commands = array_map('strtolower', $parser->csv('commands'));
+    $format = strtolower($parser->get('format', 'php-serialize') ?? 'php-serialize');
+    $out = $parser->get('out');
+
+    $allowedFormats = ['php-serialize', 'json'];
+    if (!in_array($format, $allowedFormats, true)) {
+        throw new InvalidArgumentException('Unknown format: ' . $format);
+    }
+
+    $registry = new CommandRegistry();
+    $commandSet = $registry->allowlist($commands);
+    $generator = new PayloadGenerator($commandSet, new KeyGenerator(), new ValueGenerator());
+    $payload = $generator->generate($ops, $workers, $seed);
+
+    $contents = $format === 'json'
+        ? PayloadEncoder::toJson($payload)
+        : PayloadEncoder::toSerialized($payload);
+
+    if ($out !== null) {
+        file_put_contents($out, $contents);
+    } else {
+        echo $contents;
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
+    exit(1);
+}

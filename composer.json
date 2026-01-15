@@ -12,6 +12,7 @@
         }
     ],
     "require": {
-        "symfony/process": "^8.0"
+        "symfony/process": "^8.0",
+        "monolog/monolog": "^3.10"
     }
 }

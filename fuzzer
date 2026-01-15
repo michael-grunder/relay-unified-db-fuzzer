@@ -23,6 +23,7 @@ Options:
   --port <port>           CLI server port (default 8080)
   --seed <u64>            Master seed (random if omitted)
   --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
+  --log-level <level>     Log verbosity (debug, info, notice, warning, error)
 
 TXT);
 }
@@ -49,6 +50,7 @@ try {
     $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
     $port = (int)($parser->get('port', '8080') ?? '8080');
     $reproducersDir = $parser->get('reproducers-dir', 'reproducers') ?? 'reproducers';
+    $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
 
     $options = new FuzzerOptions(
         phpBinary: $php,
@@ -62,9 +64,11 @@ try {
         host: $host,
         port: $port,
         reproducersDir: $reproducersDir,
+        logLevel: $logLevel,
     );
 
-    $app = new FuzzerApplication($options, __DIR__);
+    $logger = Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory::create('fuzzer', $logLevel);
+    $app = new FuzzerApplication($options, __DIR__, $logger);
     exit($app->run());
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL);

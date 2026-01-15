@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Mgrunder\RelayUnifiedDbFuzzer\Runner;
 
-use Mgrunder\RelayUnifiedDbFuzzer\Support\SeedUtil;
+use Psr\Log\LoggerInterface;
 
 final class ForkModeExecutor
 {
     public function __construct(
-        private readonly RelayFactory $relayFactory
+        private readonly RelayFactory $relayFactory,
+        private readonly LoggerInterface $logger
     ) {
         if (!function_exists('pcntl_fork')) {
             throw new \RuntimeException('pcntl extension is required for fork mode');
@@ -26,6 +27,10 @@ final class ForkModeExecutor
         $failures = 0;
 
         foreach ($workers as $workerPayload) {
+            $this->logger->debug('Spawning worker', [
+                'worker' => $workerPayload['worker'] ?? null,
+                'operations' => isset($workerPayload['operations']) ? count($workerPayload['operations']) : 0,
+            ]);
             $pid = pcntl_fork();
             if ($pid === -1) {
                 throw new \RuntimeException('Failed to fork worker');
@@ -55,22 +60,27 @@ final class ForkModeExecutor
     private function runChild(array $payload): void
     {
         $relay = $this->relayFactory->create();
-        $executor = new CommandExecutor($relay);
+        $executor = new CommandExecutor($relay, $this->logger);
         $worker = $payload['worker'];
+
+        $this->logger->debug('Worker started', [
+            'worker' => $worker,
+            'operations' => count($payload['operations']),
+        ]);
 
         foreach ($payload['operations'] as $operation) {
             try {
                 $executor->execute($operation);
             } catch (\Throwable $t) {
-                fwrite(STDERR, sprintf(
-                    "[worker:%d op:%d] %s\n",
-                    $worker,
-                    $operation['op'],
-                    $t->getMessage()
-                ));
+                $this->logger->error('Worker operation failed', [
+                    'worker' => $worker,
+                    'op' => $operation['op'] ?? null,
+                    'cmd' => $operation['cmd'] ?? null,
+                    'args' => $operation['args'] ?? null,
+                    'exception' => $t,
+                ]);
                 exit(1);
             }
         }
     }
 }
-

@@ -26,6 +26,7 @@ final class FuzzerOptions
         public readonly string $host = '127.0.0.1',
         public readonly int $port = 8080,
         public readonly string $reproducersDir = 'reproducers',
+        public readonly string $logLevel = 'info',
     ) {
     }
 }

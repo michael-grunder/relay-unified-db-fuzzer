@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mgrunder\RelayUnifiedDbFuzzer\Runner;
 
 use Mgrunder\RelayUnifiedDbFuzzer\Payload\PayloadEncoder;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Process\Process;
 
 final class CliServerModeExecutor
@@ -16,6 +17,8 @@ final class CliServerModeExecutor
         private readonly int $port,
         private readonly int $workers,
         private readonly ?string $phpIni,
+        private readonly string $logLevel,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -28,6 +31,11 @@ final class CliServerModeExecutor
      */
     public function run(array $payload): array
     {
+        $this->logger->info('Starting cli-server mode', [
+            'host' => $this->host,
+            'port' => $this->port,
+            'workers' => $this->workers,
+        ]);
         $server = $this->bootServer();
         $pid = $server->getPid() ?: 0;
 
@@ -40,7 +48,7 @@ final class CliServerModeExecutor
         $requestPayloads = $this->chunkRequests($payload);
         foreach ($requestPayloads as $chunk) {
             $encoded = PayloadEncoder::toSerialized($chunk);
-            $result = $this->sendRequest($encoded);
+            $result = $this->sendRequest($encoded, $chunk['worker']);
             if (!$result) {
                 $failures++;
             }
@@ -68,14 +76,24 @@ final class CliServerModeExecutor
 
         $env = [
             'PHP_CLI_SERVER_WORKERS' => (string)$this->workers,
+            'RELAY_FUZZ_LOG_LEVEL' => $this->logLevel,
         ];
 
         if ($this->phpIni !== null) {
             $env['PHPRC'] = $this->phpIni;
         }
 
+        $this->logger->debug('Booting php built-in server', [
+            'cmd' => $cmd,
+            'env' => $env,
+        ]);
         $process = new Process($cmd, $this->documentRoot, $env);
-        $process->start();
+        $process->start(function (string $type, string $buffer): void {
+            $this->logger->debug('CLI server output', [
+                'type' => $type,
+                'buffer' => trim($buffer),
+            ]);
+        });
 
         return $process;
     }
@@ -111,6 +129,7 @@ final class CliServerModeExecutor
             $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 0.1);
             if ($fp) {
                 fclose($fp);
+                $this->logger->debug('CLI server ready', ['attempts' => $attempts + 1]);
                 return true;
             }
 
@@ -118,10 +137,15 @@ final class CliServerModeExecutor
             $attempts++;
         }
 
+        $this->logger->error('CLI server did not become ready', [
+            'attempts' => $attempts,
+            'host' => $this->host,
+            'port' => $this->port,
+        ]);
         return false;
     }
 
-    private function sendRequest(string $payload): bool
+    private function sendRequest(string $payload, int $worker): bool
     {
         $context = stream_context_create([
             'http' => [
@@ -132,18 +156,29 @@ final class CliServerModeExecutor
             ],
         ]);
 
-        $response = @file_get_contents($this->endpoint('/fuzz.php'), false, $context);
+        $endpoint = $this->endpoint('/fuzz.php');
+        $response = @file_get_contents($endpoint, false, $context);
         if ($response === false) {
-            fwrite(STDERR, "Failed to POST payload to cli-server endpoint\n");
+            $this->logger->error('Failed to POST payload to cli-server endpoint', [
+                'endpoint' => $endpoint,
+                'worker' => $worker,
+            ]);
             return false;
         }
 
         $decoded = json_decode($response, true);
         if (!is_array($decoded) || ($decoded['status'] ?? null) !== 'ok') {
-            fwrite(STDERR, "CLI server reported failure: {$response}\n");
+            $this->logger->error('CLI server reported failure', [
+                'response' => $response,
+                'worker' => $worker,
+            ]);
             return false;
         }
 
+        $this->logger->debug('CLI server request completed', [
+            'worker' => $worker,
+            'response' => $decoded,
+        ]);
         return true;
     }
 
@@ -153,6 +188,7 @@ final class CliServerModeExecutor
             return;
         }
 
+        $this->logger->debug('Shutting down cli-server');
         $process->signal(SIGTERM);
         $deadline = microtime(true) + 3.0;
         while ($process->isRunning() && microtime(true) < $deadline) {
@@ -160,6 +196,7 @@ final class CliServerModeExecutor
         }
 
         if ($process->isRunning()) {
+            $this->logger->warning('CLI server did not stop gracefully, forcing kill');
             $process->signal(SIGKILL);
         }
     }
