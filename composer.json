@@ -11,5 +11,7 @@
             "email": "michael.grunder@gmail.com"
         }
     ],
-    "require": {}
+    "require": {
+        "symfony/process": "^8.0"
+    }
 }

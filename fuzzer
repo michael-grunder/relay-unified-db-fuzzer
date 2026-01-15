@@ -1,0 +1,73 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Mgrunder\RelayUnifiedDbFuzzer\Fuzzer\FuzzerApplication;
+use Mgrunder\RelayUnifiedDbFuzzer\Fuzzer\FuzzerOptions;
+use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
+
+function usage(): void
+{
+    fwrite(STDERR, <<<TXT
+Relay shared cache fuzzer
+
+Usage:
+  ./fuzzer --php <path> --php-ini <path> --ops <int> --runs <int> --workers <int> --mode <fork|cli-server> [options]
+
+Options:
+  --commands <csv>        CSV of command families or specific commands to allow
+  --host <host>           CLI server host (default 127.0.0.1)
+  --port <port>           CLI server port (default 8080)
+  --seed <u64>            Master seed (random if omitted)
+  --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
+
+TXT);
+}
+
+try {
+    $parser = new ArgvParser($_SERVER['argv']);
+    if ($parser->has('help')) {
+        usage();
+        exit(0);
+    }
+
+    $php = $parser->require('php');
+    $phpIni = $parser->require('php-ini');
+    $ops = $parser->requireInt('ops');
+    $runs = $parser->requireInt('runs');
+    $workers = $parser->requireInt('workers');
+    $mode = strtolower($parser->require('mode'));
+    if (!in_array($mode, ['fork', 'cli-server'], true)) {
+        throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
+    }
+
+    $commands = array_map('strtolower', $parser->csv('commands'));
+    $seed = $parser->optionalInt('seed');
+    $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
+    $port = (int)($parser->get('port', '8080') ?? '8080');
+    $reproducersDir = $parser->get('reproducers-dir', 'reproducers') ?? 'reproducers';
+
+    $options = new FuzzerOptions(
+        phpBinary: $php,
+        phpIni: $phpIni,
+        ops: $ops,
+        runs: $runs,
+        workers: $workers,
+        mode: $mode,
+        commands: $commands,
+        seed: $seed,
+        host: $host,
+        port: $port,
+        reproducersDir: $reproducersDir,
+    );
+
+    $app = new FuzzerApplication($options, __DIR__);
+    exit($app->run());
+} catch (Throwable $e) {
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
+    usage();
+    exit(1);
+}

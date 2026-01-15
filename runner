@@ -1,0 +1,52 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Mgrunder\RelayUnifiedDbFuzzer\Runner\RunnerApplication;
+use Mgrunder\RelayUnifiedDbFuzzer\Runner\RunnerOptions;
+use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
+
+try {
+    $parser = new ArgvParser($_SERVER['argv']);
+    if ($parser->has('help')) {
+        fwrite(STDERR, "Usage: runner --php <path> --php-ini <path> --ops <int> --seed <int> --workers <int> --mode <fork|cli-server>\n");
+        exit(0);
+    }
+
+    $php = $parser->require('php');
+    $phpIni = $parser->require('php-ini');
+    $ops = $parser->requireInt('ops');
+    $seed = $parser->requireInt('seed');
+    $workers = $parser->requireInt('workers');
+    $mode = strtolower($parser->require('mode'));
+    if (!in_array($mode, ['fork', 'cli-server'], true)) {
+        throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
+    }
+
+    $commands = array_map('strtolower', $parser->csv('commands'));
+    $artifactDir = $parser->get('artifact-dir');
+    $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
+    $port = (int)($parser->get('port', '8080') ?? '8080');
+
+    $options = new RunnerOptions(
+        phpBinary: $php,
+        phpIni: $phpIni,
+        ops: $ops,
+        workers: $workers,
+        seed: $seed,
+        mode: $mode,
+        artifactDir: $artifactDir,
+        commands: $commands,
+        host: $host,
+        port: $port,
+    );
+
+    $app = new RunnerApplication($options, __DIR__);
+    exit($app->run());
+} catch (Throwable $e) {
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
+    exit(1);
+}
