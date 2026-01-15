@@ -46,8 +46,9 @@ Common flags used by both `fuzzer` and `runner`:
 | `--artifact-dir` | (runner only) Directory where payloads/summary/logs are written |
 | `--redis-host` | Redis host (default `localhost`) |
 | `--redis-port` | Redis port (default `6379`) |
+| `--cli-server-hold` | Start CLI server and wait indefinitely after boot (skips sanity check and payloads) |
 
-`fuzzer` adds `--runs`, `--host`, `--port`, and `--reproducers-dir`. `gen_payload` adds `--format` (`php-serialize` or `json`), `--workers`, and `--out`.
+`fuzzer` adds `--runs`, `--host`, `--port`, `--reproducers-dir`, and `--cli-server-hold`. `gen_payload` adds `--format` (`php-serialize` or `json`), `--workers`, and `--out`.
 
 ## Usage Examples
 

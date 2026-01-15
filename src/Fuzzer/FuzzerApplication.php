@@ -183,6 +183,9 @@ final class FuzzerApplication
         if ($this->options->mode === 'cli-server') {
             $cmd[] = '--host=' . $this->options->host;
             $cmd[] = '--port=' . $this->options->port;
+            if ($this->options->cliServerHold) {
+                $cmd[] = '--cli-server-hold';
+            }
         }
         $cmd[] = '--log-level=' . $this->options->logLevel;
 

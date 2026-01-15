@@ -20,6 +20,7 @@ final class CliServerModeExecutor
         private readonly string $logLevel,
         private readonly string $redisHost,
         private readonly int $redisPort,
+        private readonly bool $holdOpen,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -45,6 +46,21 @@ final class CliServerModeExecutor
             $this->shutdownServer($server);
             throw new \RuntimeException('PHP built-in server did not become ready');
         }
+        if ($this->holdOpen) {
+            $this->logger->warning('CLI server hold enabled; leaving server running for inspection', [
+                'endpoint' => $this->endpoint('/'),
+                'fuzz_endpoint' => $this->endpoint('/fuzz.php', $this->buildEndpointQuery()),
+                'sanity_endpoint' => $this->endpoint('/check.php', $this->buildEndpointQuery(['flush' => '1'])),
+                'doc_root' => $this->documentRoot,
+                'pid' => $pid,
+            ]);
+            $this->holdServerOpen($server);
+            return [
+                'pids' => $pid > 0 ? [$pid] : [],
+                'failures' => 0,
+            ];
+        }
+
         $sanity = $this->sanityCheckServer();
         if (!$sanity['ok']) {
             $this->shutdownServer($server);
@@ -83,9 +99,6 @@ final class CliServerModeExecutor
 
         $env = [
             'PHP_CLI_SERVER_WORKERS' => (string)$this->workers,
-            'RELAY_FUZZ_LOG_LEVEL' => $this->logLevel,
-            'RELAY_REDIS_HOST' => $this->redisHost,
-            'RELAY_REDIS_PORT' => (string)$this->redisPort,
         ];
 
         if ($this->phpIni !== null) {
@@ -97,6 +110,7 @@ final class CliServerModeExecutor
             'env' => $env,
         ]);
         $process = new Process($cmd, $this->documentRoot, $env);
+
         $process->start(function (string $type, string $buffer): void {
             $this->logger->debug('CLI server output', [
                 'type' => $type,
@@ -154,6 +168,18 @@ final class CliServerModeExecutor
         return false;
     }
 
+    private function holdServerOpen(Process $process): void
+    {
+        while ($process->isRunning()) {
+            usleep(500000);
+        }
+
+        $this->logger->warning('CLI server exited while holding open', [
+            'exit_code' => $process->getExitCode(),
+            'signal' => $process->getTermSignal(),
+        ]);
+    }
+
     /**
      * @return array{
      *     ok: bool,
@@ -165,12 +191,7 @@ final class CliServerModeExecutor
      */
     private function sanityCheckServer(): array
     {
-        $query = http_build_query([
-            'host' => $this->redisHost,
-            'port' => $this->redisPort,
-            'flush' => '1',
-        ]);
-        $endpoint = $this->endpoint('/check.php') . '?' . $query;
+        $endpoint = $this->endpoint('/check.php', $this->buildEndpointQuery(['flush' => '1']));
         $result = [
             'ok' => false,
             'endpoint' => $endpoint,
@@ -237,7 +258,7 @@ final class CliServerModeExecutor
             ],
         ]);
 
-        $endpoint = $this->endpoint('/fuzz.php');
+        $endpoint = $this->endpoint('/fuzz.php', $this->buildEndpointQuery());
         $response = @file_get_contents($endpoint, false, $context);
         if ($response === false) {
             $this->logger->error('Failed to POST payload to cli-server endpoint', [
@@ -282,9 +303,27 @@ final class CliServerModeExecutor
         }
     }
 
-    private function endpoint(string $path): string
+    private function endpoint(string $path, array $query = []): string
     {
-        return sprintf('http://%s:%d%s', $this->host, $this->port, $path);
+        $url = sprintf('http://%s:%d%s', $this->host, $this->port, $path);
+        if ($query === []) {
+            return $url;
+        }
+
+        return $url . '?' . http_build_query($query);
+    }
+
+    /**
+     * @param array<string, string|int> $extra
+     * @return array<string, string|int>
+     */
+    private function buildEndpointQuery(array $extra = []): array
+    {
+        return $extra + [
+            'log-level' => $this->logLevel,
+            'redis-host' => $this->redisHost,
+            'redis-port' => $this->redisPort,
+        ];
     }
 
     /**

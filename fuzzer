@@ -26,6 +26,7 @@ Options:
   --seed <u64>            Master seed (random if omitted)
   --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
   --log-level <level>     Log verbosity (debug, info, notice, warning, error)
+  --cli-server-hold       Start cli-server and wait indefinitely after boot
 
 TXT);
 }
@@ -55,6 +56,7 @@ try {
     $redisPort = (int)($parser->get('redis-port', '6379') ?? '6379');
     $reproducersDir = $parser->get('reproducers-dir', 'reproducers') ?? 'reproducers';
     $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
+    $cliServerHold = $parser->has('cli-server-hold');
 
     $options = new FuzzerOptions(
         phpBinary: $php,
@@ -71,6 +73,7 @@ try {
         redisPort: $redisPort,
         reproducersDir: $reproducersDir,
         logLevel: $logLevel,
+        cliServerHold: $cliServerHold,
     );
 
     $logger = Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory::create('fuzzer', $logLevel);

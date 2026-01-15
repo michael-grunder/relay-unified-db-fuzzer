@@ -1,0 +1,126 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
+use Symfony\Component\Process\Process;
+
+function usage(): void
+{
+    fwrite(STDERR, <<<TXT
+Debug cli-server bootstrap
+
+Usage:
+  bin/cli-server-debug --php <path> --php-ini <path> --workers <int> [options]
+
+Options:
+  --host <host>           CLI server host (default 127.0.0.1)
+  --port <port>           CLI server port (default 8080)
+  --redis-host <host>     Redis host (default localhost)
+  --redis-port <port>     Redis port (default 6379)
+  --log-level <level>     Log verbosity for endpoint (default info)
+  --document-root <dir>   Document root (default ./public)
+
+TXT);
+}
+
+function waitForServerReady(string $host, int $port): bool
+{
+    $attempts = 0;
+    $maxAttempts = 30;
+    $sleepUsec = 100000;
+
+    while ($attempts < $maxAttempts) {
+        $fp = @fsockopen($host, $port, $errno, $errstr, 0.1);
+        if ($fp) {
+            fclose($fp);
+            return true;
+        }
+
+        usleep($sleepUsec);
+        $attempts++;
+    }
+
+    return false;
+}
+
+try {
+    $parser = new ArgvParser($_SERVER['argv']);
+    if ($parser->has('help')) {
+        usage();
+        exit(0);
+    }
+
+    $php = $parser->require('php');
+    $phpIni = $parser->require('php-ini');
+    $workers = $parser->requireInt('workers');
+    $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
+    $port = (int)($parser->get('port', '8080') ?? '8080');
+    $redisHost = $parser->get('redis-host', 'localhost') ?? 'localhost';
+    $redisPort = (int)($parser->get('redis-port', '6379') ?? '6379');
+    $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
+    $documentRoot = $parser->get('document-root', dirname(__DIR__) . '/public') ?? dirname(__DIR__) . '/public';
+
+    $cmd = [$php];
+    if ($phpIni !== null) {
+        $cmd[] = '-c';
+        $cmd[] = $phpIni;
+    }
+    $cmd[] = '-S';
+    $cmd[] = sprintf('%s:%d', $host, $port);
+    $cmd[] = '-t';
+    $cmd[] = $documentRoot;
+
+    $env = [
+        'PHP_CLI_SERVER_WORKERS' => (string)$workers,
+    ];
+    if ($phpIni !== null) {
+        $env['PHPRC'] = $phpIni;
+    }
+
+    $process = new Process($cmd, $documentRoot, $env);
+    $process->start(static function (string $type, string $buffer): void {
+        $label = $type === Process::ERR ? 'stderr' : 'stdout';
+        fwrite(STDERR, sprintf('[cli-server %s] %s', $label, $buffer));
+    });
+
+    $query = http_build_query([
+        'log-level' => $logLevel,
+        'redis-host' => $redisHost,
+        'redis-port' => $redisPort,
+    ]);
+    $checkQuery = http_build_query([
+        'log-level' => $logLevel,
+        'redis-host' => $redisHost,
+        'redis-port' => $redisPort,
+        'flush' => '1',
+    ]);
+
+    fwrite(STDOUT, "CLI server starting\n");
+    fwrite(STDOUT, "Document root: {$documentRoot}\n");
+    fwrite(STDOUT, "Command: " . implode(' ', array_map('escapeshellarg', $cmd)) . "\n");
+    fwrite(STDOUT, sprintf("Fuzz endpoint: http://%s:%d/fuzz.php?%s\n", $host, $port, $query));
+    fwrite(STDOUT, sprintf("Sanity endpoint: http://%s:%d/check.php?%s\n", $host, $port, $checkQuery));
+
+    if (!waitForServerReady($host, $port)) {
+        throw new RuntimeException(sprintf('CLI server did not become ready at %s:%d', $host, $port));
+    }
+
+    fwrite(STDOUT, "CLI server is ready. Press Ctrl+C to stop.\n");
+
+    while ($process->isRunning()) {
+        usleep(500000);
+    }
+
+    $exitCode = $process->getExitCode();
+    $signal = $process->getTermSignal();
+    fwrite(STDERR, sprintf("CLI server exited (code: %s, signal: %s)\n", $exitCode ?? 'n/a', $signal ?? 'n/a'));
+    exit($exitCode ?? 1);
+} catch (Throwable $e) {
+    fwrite(STDERR, $e::class . ': ' . $e->getMessage() . PHP_EOL);
+    fwrite(STDERR, $e->getTraceAsString() . PHP_EOL);
+    exit(1);
+}

@@ -23,6 +23,7 @@ final class RunnerOptions
         public readonly string $redisHost = 'localhost',
         public readonly int $redisPort = 6379,
         public readonly string $logLevel = 'info',
+        public readonly bool $cliServerHold = false,
     ) {
     }
 }

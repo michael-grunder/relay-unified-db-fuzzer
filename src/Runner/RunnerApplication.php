@@ -128,6 +128,7 @@ final class RunnerApplication
             $this->options->logLevel,
             $this->options->redisHost,
             $this->options->redisPort,
+            $this->options->cliServerHold,
             $this->logger
         );
 

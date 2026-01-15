@@ -29,6 +29,7 @@ final class FuzzerOptions
         public readonly int $redisPort = 6379,
         public readonly string $reproducersDir = 'reproducers',
         public readonly string $logLevel = 'info',
+        public readonly bool $cliServerHold = false,
     ) {
     }
 }

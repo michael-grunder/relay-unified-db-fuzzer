@@ -9,9 +9,9 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory;
 
 header('Content-Type: application/json');
 
-$logLevel = strtolower(getenv('RELAY_FUZZ_LOG_LEVEL') ?: 'info');
-$redisHost = $_GET['host'] ?? (getenv('RELAY_REDIS_HOST') ?: 'localhost');
-$redisPort = (int)($_GET['port'] ?? (getenv('RELAY_REDIS_PORT') ?: '6379'));
+$logLevel = strtolower((string)($_GET['log-level'] ?? 'info'));
+$redisHost = $_GET['redis-host'] ?? $_GET['host'] ?? 'localhost';
+$redisPort = (int)($_GET['redis-port'] ?? $_GET['port'] ?? '6379');
 $flush = filter_var($_GET['flush'] ?? '0', FILTER_VALIDATE_BOOLEAN);
 $logger = LoggerFactory::create('check-endpoint', $logLevel);
 

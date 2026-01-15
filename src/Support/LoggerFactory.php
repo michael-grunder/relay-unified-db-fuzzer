@@ -7,6 +7,7 @@ namespace Mgrunder\RelayUnifiedDbFuzzer\Support;
 use Monolog\Formatter\LineFormatter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
+use Monolog\Handler\WhatFailureGroupHandler;
 use Psr\Log\LoggerInterface;
 
 final class LoggerFactory
@@ -24,7 +25,7 @@ final class LoggerFactory
         $formatter = new LineFormatter(null, null, true, true);
         $formatter->includeStacktraces(true);
         $handler->setFormatter($formatter);
-        $logger->pushHandler($handler);
+        $logger->pushHandler(new WhatFailureGroupHandler([$handler]));
 
         return $logger;
     }
