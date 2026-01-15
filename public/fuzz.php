@@ -12,6 +12,8 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory;
 header('Content-Type: application/json');
 
 $logLevel = strtolower(getenv('RELAY_FUZZ_LOG_LEVEL') ?: 'info');
+$redisHost = getenv('RELAY_REDIS_HOST') ?: 'localhost';
+$redisPort = (int)(getenv('RELAY_REDIS_PORT') ?: '6379');
 $logger = LoggerFactory::create('fuzz-endpoint', $logLevel);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -36,7 +38,7 @@ try {
         'bytes' => strlen($body),
     ]);
 
-    $relay = (new RelayFactory())->create();
+    $relay = (new RelayFactory(null, $redisHost, $redisPort))->create();
     $executor = new CommandExecutor($relay, $logger);
     foreach ($operations as $operation) {
         if (!is_array($operation)) {

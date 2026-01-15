@@ -18,6 +18,8 @@ final class CliServerModeExecutor
         private readonly int $workers,
         private readonly ?string $phpIni,
         private readonly string $logLevel,
+        private readonly string $redisHost,
+        private readonly int $redisPort,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -77,6 +79,8 @@ final class CliServerModeExecutor
         $env = [
             'PHP_CLI_SERVER_WORKERS' => (string)$this->workers,
             'RELAY_FUZZ_LOG_LEVEL' => $this->logLevel,
+            'RELAY_REDIS_HOST' => $this->redisHost,
+            'RELAY_REDIS_PORT' => (string)$this->redisPort,
         ];
 
         if ($this->phpIni !== null) {

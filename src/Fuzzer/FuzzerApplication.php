@@ -177,6 +177,9 @@ final class FuzzerApplication
             $cmd[] = '--commands=' . implode(',', $this->options->commands);
         }
 
+        $cmd[] = '--redis-host=' . $this->options->redisHost;
+        $cmd[] = '--redis-port=' . $this->options->redisPort;
+
         if ($this->options->mode === 'cli-server') {
             $cmd[] = '--host=' . $this->options->host;
             $cmd[] = '--port=' . $this->options->port;

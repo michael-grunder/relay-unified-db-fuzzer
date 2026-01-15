@@ -8,6 +8,8 @@ final class RelayFactory
 {
     public function __construct(
         private readonly ?string $phpIni = null,
+        private readonly string $redisHost = 'localhost',
+        private readonly int $redisPort = 6379,
     ) {
     }
 
@@ -18,7 +20,6 @@ final class RelayFactory
         }
 
         // Future: customize connection/ini handling.
-        return new \Relay\Relay();
+        return new \Relay\Relay($this->redisHost, $this->redisPort);
     }
 }
-

@@ -25,6 +25,8 @@ final class FuzzerOptions
         public readonly ?int $seed = null,
         public readonly string $host = '127.0.0.1',
         public readonly int $port = 8080,
+        public readonly string $redisHost = 'localhost',
+        public readonly int $redisPort = 6379,
         public readonly string $reproducersDir = 'reproducers',
         public readonly string $logLevel = 'info',
     ) {

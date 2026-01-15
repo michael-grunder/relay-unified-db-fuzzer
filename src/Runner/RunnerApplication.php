@@ -27,6 +27,8 @@ final class RunnerApplication
             'artifact_dir' => $artifactDir,
             'mode' => $this->options->mode,
             'log_level' => $this->options->logLevel,
+            'redis_host' => $this->options->redisHost,
+            'redis_port' => $this->options->redisPort,
         ]);
         $registry = new CommandRegistry();
         $commandSet = $registry->allowlist($this->options->commands);
@@ -104,7 +106,7 @@ final class RunnerApplication
     private function runForkMode(array $payload): array
     {
         $executor = new ForkModeExecutor(
-            new RelayFactory($this->options->phpIni),
+            new RelayFactory($this->options->phpIni, $this->options->redisHost, $this->options->redisPort),
             $this->logger
         );
         return $executor->run($payload['workers']);
@@ -124,6 +126,8 @@ final class RunnerApplication
             $this->options->workers,
             $this->options->phpIni,
             $this->options->logLevel,
+            $this->options->redisHost,
+            $this->options->redisPort,
             $this->logger
         );
 

@@ -44,6 +44,8 @@ Common flags used by both `fuzzer` and `runner`:
 | `--commands` | Comma-separated allowlist. Values can be families (`string`, `hash`, `list`, `set`, `zset`) or individual commands (see below) |
 | `--seed` | Deterministic seed. `fuzzer` will derive a per-run seed from it so failures reproduce |
 | `--artifact-dir` | (runner only) Directory where payloads/summary/logs are written |
+| `--redis-host` | Redis host (default `localhost`) |
+| `--redis-port` | Redis port (default `6379`) |
 
 `fuzzer` adds `--runs`, `--host`, `--port`, and `--reproducers-dir`. `gen_payload` adds `--format` (`php-serialize` or `json`), `--workers`, and `--out`.
 
