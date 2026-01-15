@@ -12,7 +12,7 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
 try {
     $parser = new ArgvParser($_SERVER['argv']);
     if ($parser->has('help')) {
-        fwrite(STDERR, "Usage: runner --php <path> --ops <int> --seed <int> [--workers <int>] --mode <fork|cli-server> [--php-ini <path> --redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold]\n");
+        fwrite(STDERR, "Usage: runner --php <path> --ops <int> --seed <int> [--workers <int>] --mode <fork|cli-server> [--php-ini <path> --redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold --rr --rr-trace-dir <dir>]\n");
         exit(0);
     }
 
@@ -40,12 +40,47 @@ try {
 
     $commands = array_map('strtolower', $parser->csv('commands'));
     $artifactDir = $parser->get('artifact-dir');
+    $rr = $parser->has('rr');
+    $rrTraceDir = $parser->get('rr-trace-dir');
     $host = $parser->get('host', '127.0.0.1') ?? '127.0.0.1';
     $port = (int)($parser->get('port', '8080') ?? '8080');
     $redisHost = $parser->get('redis-host', 'localhost') ?? 'localhost';
     $redisPort = (int)($parser->get('redis-port', '6379') ?? '6379');
     $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
     $cliServerHold = $parser->has('cli-server-hold');
+
+    if ($rrTraceDir !== null && !str_starts_with($rrTraceDir, '/')) {
+        $candidate = $cwd . '/' . $rrTraceDir;
+        $real = realpath($candidate);
+        $rrTraceDir = $real !== false ? $real : $candidate;
+    }
+
+    if ($rr && getenv('RELAY_RR_WRAPPED') !== '1') {
+        $traceRoot = $rrTraceDir;
+        if ($traceRoot === null) {
+            $base = $artifactDir ?? (sys_get_temp_dir() . '/relay-rr-' . uniqid());
+            $traceRoot = $base . '/rr';
+        }
+
+        if (!is_dir($traceRoot) && !mkdir($traceRoot, 0777, true) && !is_dir($traceRoot)) {
+            throw new RuntimeException(sprintf('Failed to create rr trace directory "%s"', $traceRoot));
+        }
+
+        putenv('RELAY_RR_WRAPPED=1');
+        putenv('_RR_TRACE_DIR=' . $traceRoot);
+        putenv('RELAY_RR_TRACE_DIR=' . $traceRoot);
+
+        $cmd = ['rr', 'record', $php];
+        if ($phpIni !== null) {
+            $cmd[] = '-c';
+            $cmd[] = $phpIni;
+        }
+        $cmd[] = __FILE__;
+        $cmd = array_merge($cmd, array_slice($_SERVER['argv'], 1));
+        $cmdLine = implode(' ', array_map('escapeshellarg', $cmd));
+        passthru($cmdLine, $status);
+        exit($status);
+    }
 
     $options = new RunnerOptions(
         phpBinary: $php,
@@ -55,6 +90,8 @@ try {
         seed: $seed,
         mode: $mode,
         artifactDir: $artifactDir,
+        rr: $rr,
+        rrTraceDir: $rrTraceDir,
         commands: $commands,
         host: $host,
         port: $port,

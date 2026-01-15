@@ -17,6 +17,8 @@ final class RunnerOptions
         public readonly int $seed,
         public readonly string $mode,
         public readonly ?string $artifactDir,
+        public readonly bool $rr = false,
+        public readonly ?string $rrTraceDir = null,
         public readonly array $commands = [],
         public readonly string $host = '127.0.0.1',
         public readonly int $port = 8080,

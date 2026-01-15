@@ -41,6 +41,7 @@ final class FuzzerApplication
             'ops' => $this->options->ops,
             'workers' => $this->options->workers,
             'mode' => $this->options->mode,
+            'rr' => $this->options->rr,
             'commands' => $this->options->commands,
         ]);
         $failures = 0;
@@ -132,6 +133,7 @@ final class FuzzerApplication
             'exit' => $exitCode,
             'failures' => $failures,
             'cores' => count($coreFiles),
+            'crash_signals' => $summary['crash_signals'] ?? [],
             'error' => $summary['error'] ?? null,
             'error_class' => $summary['error_class'] ?? null,
         ]);
@@ -143,6 +145,7 @@ final class FuzzerApplication
                 'exit' => $exitCode,
                 'failures' => $failures,
                 'cores' => $coreFiles,
+                'crash_signals' => $summary['crash_signals'] ?? [],
                 'summary_path' => $summaryPath,
                 'stderr' => $stderrFile,
                 'error' => $summary['error'] ?? null,
@@ -176,6 +179,13 @@ final class FuzzerApplication
         $cmd[] = '--mode=' . $this->options->mode;
         $cmd[] = '--seed=' . $runSeed;
         $cmd[] = '--artifact-dir=' . $runDir;
+        if ($this->options->rr) {
+            $cmd[] = '--rr';
+            if ($this->options->rrTraceDir !== null) {
+                $rrDir = rtrim($this->options->rrTraceDir, '/') . '/' . basename($runDir);
+                $cmd[] = '--rr-trace-dir=' . $rrDir;
+            }
+        }
 
         if ($this->options->commands !== []) {
             $cmd[] = '--commands=' . implode(',', $this->options->commands);
@@ -265,6 +275,15 @@ final class FuzzerApplication
             }
             copy($path, $dst);
         }
+
+        $rrTraceDir = $summary['rr_trace_dir'] ?? null;
+        if (is_string($rrTraceDir) && is_dir($rrTraceDir)) {
+            $dst = $dir . '/' . basename($rrTraceDir);
+            if (file_exists($dst)) {
+                $dst = sprintf('%s/%s.%s', $dir, basename($rrTraceDir), uniqid());
+            }
+            $this->copyDir($rrTraceDir, $dst);
+        }
     }
 
     /**
@@ -273,5 +292,31 @@ final class FuzzerApplication
     private function formatCommand(array $command): string
     {
         return implode(' ', array_map('escapeshellarg', $command));
+    }
+
+    private function copyDir(string $src, string $dst): void
+    {
+        if (!is_dir($src)) {
+            return;
+        }
+
+        if (!is_dir($dst) && !mkdir($dst, 0777, true) && !is_dir($dst)) {
+            throw new \RuntimeException(sprintf('Failed to create directory "%s"', $dst));
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($src, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $entry) {
+            $target = $dst . '/' . $iterator->getSubPathName();
+            if ($entry->isDir()) {
+                if (!is_dir($target) && !mkdir($target, 0777, true) && !is_dir($target)) {
+                    throw new \RuntimeException(sprintf('Failed to create directory "%s"', $target));
+                }
+                continue;
+            }
+            copy($entry->getPathname(), $target);
+        }
     }
 }

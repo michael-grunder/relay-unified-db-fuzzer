@@ -26,6 +26,8 @@ final class RunnerApplication
         $this->logger->info('Runner starting', [
             'artifact_dir' => $artifactDir,
             'mode' => $this->options->mode,
+            'rr' => $this->options->rr,
+            'rr_trace_dir' => $this->options->rrTraceDir,
             'log_level' => $this->options->logLevel,
             'redis_host' => $this->options->redisHost,
             'redis_port' => $this->options->redisPort,
@@ -57,15 +59,26 @@ final class RunnerApplication
         file_put_contents($payloadBin, PayloadEncoder::toSerialized($payload));
         file_put_contents($payloadJson, PayloadEncoder::toJson($payload));
 
-        $result = ['pids' => [], 'failures' => 0];
+        $result = ['pids' => [], 'failures' => 0, 'crash_signals' => []];
         $error = null;
         $errorClass = null;
         $errorTrace = null;
+        $rrTraceDir = null;
 
         try {
             $result = $this->options->mode === 'cli-server'
                 ? $this->runCliServerMode($payload)
                 : $this->runForkMode($payload);
+        } catch (CliServerCrashException $t) {
+            $result['crash_signals'] = $t->crashSignals();
+            $error = $t->getMessage();
+            $errorClass = $t::class;
+            $errorTrace = $t->getTraceAsString();
+            $result['failures'] = max(1, $result['failures']);
+            $this->logger->error('Runner exception', [
+                'exception' => $t,
+                'mode' => $this->options->mode,
+            ]);
         } catch (\Throwable $t) {
             $error = $t->getMessage();
             $errorClass = $t::class;
@@ -77,13 +90,16 @@ final class RunnerApplication
             ]);
         }
 
+        $rrTraceDir = $this->finalizeRrTrace($artifactDir, $result['crash_signals']);
         $summary = [
             'mode' => $this->options->mode,
             'seed' => $this->options->seed,
             'pids' => $result['pids'],
             'failures' => $result['failures'],
+            'crash_signals' => $result['crash_signals'],
             'payload_bin' => $payloadBin,
             'payload_json' => $payloadJson,
+            'rr_trace_dir' => $rrTraceDir,
             'error' => $error,
             'error_class' => $errorClass,
             'error_trace' => $errorTrace,
@@ -101,7 +117,7 @@ final class RunnerApplication
 
     /**
      * @param array<string, mixed> $payload
-     * @return array{pids:list<int>, failures:int}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
      */
     private function runForkMode(array $payload): array
     {
@@ -114,7 +130,7 @@ final class RunnerApplication
 
     /**
      * @param array<string, mixed> $payload
-     * @return array{pids:list<int>, failures:int}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
      */
     private function runCliServerMode(array $payload): array
     {
@@ -156,5 +172,108 @@ final class RunnerApplication
         }
 
         return $count;
+    }
+
+    /**
+     * @param list<array{pid:int, signal:int}> $crashSignals
+     */
+    private function finalizeRrTrace(string $artifactDir, array $crashSignals): ?string
+    {
+        if (!$this->options->rr) {
+            return null;
+        }
+
+        $traceRoot = $this->options->rrTraceDir;
+        if ($traceRoot === null) {
+            $traceRoot = getenv('RELAY_RR_TRACE_DIR') ?: getenv('_RR_TRACE_DIR') ?: null;
+        }
+        if ($traceRoot === null || !is_dir($traceRoot)) {
+            return null;
+        }
+
+        $traceDir = $this->findRrTraceDir($traceRoot);
+        if ($traceDir === null) {
+            return null;
+        }
+
+        if ($crashSignals === []) {
+            $this->removePath($traceRoot);
+            return null;
+        }
+
+        $destination = $artifactDir . '/rr-trace';
+        if (file_exists($destination)) {
+            $destination = $artifactDir . '/rr-trace-' . uniqid();
+        }
+
+        if ($traceDir === $traceRoot) {
+            if (!rename($traceRoot, $destination)) {
+                $this->logger->warning('Failed to rename rr trace directory', [
+                    'src' => $traceRoot,
+                    'dst' => $destination,
+                ]);
+                return null;
+            }
+            return $destination;
+        }
+
+        if (!rename($traceDir, $destination)) {
+            $this->logger->warning('Failed to move rr trace directory', [
+                'src' => $traceDir,
+                'dst' => $destination,
+            ]);
+            return null;
+        }
+
+        $this->removePath($traceRoot);
+        return $destination;
+    }
+
+    private function findRrTraceDir(string $traceRoot): ?string
+    {
+        $candidate = null;
+        $hasEntry = false;
+        foreach (new \DirectoryIterator($traceRoot) as $entry) {
+            if ($entry->isDot()) {
+                continue;
+            }
+
+            $hasEntry = true;
+            if ($entry->isDir()) {
+                $candidate ??= $entry->getPathname();
+                continue;
+            }
+        }
+
+        if (!$hasEntry) {
+            return null;
+        }
+
+        return $candidate ?? $traceRoot;
+    }
+
+    private function removePath(string $path): void
+    {
+        if (!file_exists($path)) {
+            return;
+        }
+
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($iterator as $entry) {
+            if ($entry->isDir()) {
+                @rmdir($entry->getPathname());
+            } else {
+                @unlink($entry->getPathname());
+            }
+        }
+        @rmdir($path);
     }
 }

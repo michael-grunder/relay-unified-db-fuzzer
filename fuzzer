@@ -27,6 +27,8 @@ Options:
   --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
   --log-level <level>     Log verbosity (debug, info, notice, warning, error)
   --cli-server-hold       Start cli-server and wait indefinitely after boot
+  --rr                    Run the target under rr and capture traces on crash signals
+  --rr-trace-dir <dir>    Base directory for rr traces (default per-run artifact dir)
   --php-ini <path>        Optional php.ini to pass through
 
 TXT);
@@ -75,6 +77,11 @@ try {
     $reproducersDir = $parser->get('reproducers-dir', 'reproducers') ?? 'reproducers';
     $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
     $cliServerHold = $parser->has('cli-server-hold');
+    $rr = $parser->has('rr');
+    $rrTraceDir = $parser->get('rr-trace-dir');
+    if ($rrTraceDir !== null) {
+        $rrTraceDir = resolvePath($rrTraceDir, $cwd);
+    }
 
     $options = new FuzzerOptions(
         phpBinary: $php,
@@ -83,6 +90,8 @@ try {
         runs: $runs,
         workers: $workers,
         mode: $mode,
+        rr: $rr,
+        rrTraceDir: $rrTraceDir,
         commands: $commands,
         seed: $seed,
         host: $host,

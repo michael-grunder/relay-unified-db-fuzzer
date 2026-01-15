@@ -30,7 +30,7 @@ final class CliServerModeExecutor
      *     meta: array<string, int|string>,
      *     workers: list<array{worker:int, operations:list<array{op:int, cmd:string, args:array}>}>
      * } $payload
-     * @return array{pids:list<int>, failures:int}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
      */
     public function run(array $payload): array
     {
@@ -60,13 +60,19 @@ final class CliServerModeExecutor
             return [
                 'pids' => $pid > 0 ? [$pid] : [],
                 'failures' => 0,
+                'crash_signals' => $this->captureCrashSignals($server),
             ];
         }
 
         $sanity = $this->sanityCheckServer();
         if (!$sanity['ok']) {
+            $crashSignals = $this->captureCrashSignals($server);
             $this->shutdownServer($server);
-            throw new \RuntimeException($this->formatSanityCheckFailure($sanity));
+            $message = $this->formatSanityCheckFailure($sanity);
+            if ($crashSignals !== []) {
+                throw new CliServerCrashException($message, $crashSignals);
+            }
+            throw new \RuntimeException($message);
         }
 
         $failures = 0;
@@ -76,6 +82,10 @@ final class CliServerModeExecutor
             $result = $this->sendRequest($encoded, $chunk['worker']);
             if (!$result) {
                 $failures++;
+                if (!$server->isRunning()) {
+                    $this->captureCrashSignals($server);
+                    break;
+                }
             }
         }
 
@@ -84,6 +94,7 @@ final class CliServerModeExecutor
         return [
             'pids' => $pid > 0 ? [$pid] : [],
             'failures' => $failures,
+            'crash_signals' => $this->captureCrashSignals($server),
         ];
     }
 
@@ -152,11 +163,15 @@ final class CliServerModeExecutor
 
         while ($attempts < $maxAttempts) {
             if (!$process->isRunning()) {
+                $crashSignals = $this->captureCrashSignals($process);
                 $detail = $this->formatProcessFailure($process);
                 $this->logger->error('CLI server exited during startup', [
                     'attempts' => $attempts,
                     'detail' => $detail,
                 ]);
+                if ($crashSignals !== []) {
+                    throw new CliServerCrashException($detail, $crashSignals);
+                }
                 throw new \RuntimeException($detail);
             }
             $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 0.1);
@@ -384,5 +399,23 @@ final class CliServerModeExecutor
         }
 
         return $message . ' ' . implode(' ', $details);
+    }
+
+    /**
+     * @return list<array{pid:int, signal:int}>
+     */
+    private function captureCrashSignals(Process $process): array
+    {
+        if ($process->isRunning()) {
+            return [];
+        }
+
+        $signal = $process->getTermSignal();
+        if (!CrashSignals::isCrashSignal($signal)) {
+            return [];
+        }
+
+        $pid = $process->getPid() ?? 0;
+        return [['pid' => $pid, 'signal' => $signal]];
     }
 }

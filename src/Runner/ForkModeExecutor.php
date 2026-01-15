@@ -19,12 +19,13 @@ final class ForkModeExecutor
 
     /**
      * @param list<array{worker:int, operations:list<array{cmd:string,args:array,op:int}>}> $workers
-     * @return array{pids:list<int>, failures:int}
+     * @return array{pids:list<int>, failures:int, crash_signals:list<array{pid:int, signal:int}>}
      */
     public function run(array $workers): array
     {
         $childPids = [];
         $failures = 0;
+        $crashSignals = [];
 
         foreach ($workers as $workerPayload) {
             $this->logger->debug('Spawning worker', [
@@ -46,12 +47,18 @@ final class ForkModeExecutor
 
         foreach ($childPids as $pid) {
             pcntl_waitpid($pid, $status);
+            if (pcntl_wifsignaled($status)) {
+                $signal = pcntl_wtermsig($status);
+                if (CrashSignals::isCrashSignal($signal)) {
+                    $crashSignals[] = ['pid' => $pid, 'signal' => $signal];
+                }
+            }
             if (!pcntl_wifexited($status) || pcntl_wexitstatus($status) !== 0) {
                 $failures++;
             }
         }
 
-        return ['pids' => $childPids, 'failures' => $failures];
+        return ['pids' => $childPids, 'failures' => $failures, 'crash_signals' => $crashSignals];
     }
 
     /**
