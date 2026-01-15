@@ -5,3 +5,5 @@ relay.stub.php
 composer-lock.json
 *.ini
 reproducers/
+package-lock.json
+composer.lock
