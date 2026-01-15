@@ -126,6 +126,9 @@ final class FuzzerApplication
         $exitCode = $process->getExitCode();
         $failures = (int)($summary['failures'] ?? 0);
         $pids = $summary['pids'] ?? [];
+        $relayStats = is_array($summary['relay_stats'] ?? null) ? $summary['relay_stats'] : [];
+        $relayUsage = is_array($relayStats['usage'] ?? null) ? $relayStats['usage'] : [];
+        $relayCacheStats = is_array($relayStats['stats'] ?? null) ? $relayStats['stats'] : [];
         $coreFiles = $this->collectCoreFiles($pids);
         $hadFailure = ($exitCode !== 0) || $failures > 0 || $coreFiles !== [];
 
@@ -138,6 +141,10 @@ final class FuzzerApplication
             'crash_signals' => $summary['crash_signals'] ?? [],
             'error' => $summary['error'] ?? null,
             'error_class' => $summary['error_class'] ?? null,
+            'usage_total_requests' => $relayUsage['total_requests'] ?? null,
+            'usage_max_active_requests' => $relayUsage['max_active_requests'] ?? null,
+            'stats_hits' => $relayCacheStats['hits'] ?? null,
+            'stats_misses' => $relayCacheStats['misses'] ?? null,
         ]);
 
         if ($hadFailure) {
