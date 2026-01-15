@@ -9,24 +9,25 @@ namespace Mgrunder\RelayUnifiedDbFuzzer\Support;
  */
 final class DeterministicRng
 {
+    private const DEFAULT_SEED = -7046029288634856825; // 0x9E3779B185EBCA87 as signed int64
     private int $state;
 
     public function __construct(int $seed)
     {
         if ($seed === 0) {
-            $seed = 0x9E3779B185EBCA87;
+            $seed = self::DEFAULT_SEED;
         }
 
-        $this->state = $seed & 0xFFFFFFFFFFFFFFFF;
+        $this->state = $seed;
     }
 
     public function nextUInt64(): int
     {
         $x = $this->state;
-        $x ^= ($x << 7) & 0xFFFFFFFFFFFFFFFF;
+        $x ^= ($x << 7);
         $x ^= ($x >> 9);
-        $x ^= ($x << 8) & 0xFFFFFFFFFFFFFFFF;
-        $this->state = $x & 0xFFFFFFFFFFFFFFFF;
+        $x ^= ($x << 8);
+        $this->state = $x;
 
         return $this->state;
     }
@@ -37,7 +38,8 @@ final class DeterministicRng
             throw new \InvalidArgumentException('max must be positive');
         }
 
-        return (int)($this->nextUInt64() % $max);
+        $value = $this->nextUInt64() & PHP_INT_MAX;
+        return (int)($value % $max);
     }
 
     public function nextRange(int $min, int $max): int
@@ -99,4 +101,3 @@ final class DeterministicRng
         return $result;
     }
 }
-
