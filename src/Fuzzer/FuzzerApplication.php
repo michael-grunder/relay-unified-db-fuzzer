@@ -129,6 +129,7 @@ final class FuzzerApplication
         $relayStats = is_array($summary['relay_stats'] ?? null) ? $summary['relay_stats'] : [];
         $relayUsage = is_array($relayStats['usage'] ?? null) ? $relayStats['usage'] : [];
         $relayCacheStats = is_array($relayStats['stats'] ?? null) ? $relayStats['stats'] : [];
+        $relayIni = is_array($relayStats['ini'] ?? null) ? $relayStats['ini'] : [];
         $coreFiles = $this->collectCoreFiles($pids);
         $hadFailure = ($exitCode !== 0) || $failures > 0 || $coreFiles !== [];
 
@@ -145,6 +146,7 @@ final class FuzzerApplication
             'usage_max_active_requests' => $relayUsage['max_active_requests'] ?? null,
             'stats_hits' => $relayCacheStats['hits'] ?? null,
             'stats_misses' => $relayCacheStats['misses'] ?? null,
+            'ini' => $relayIni,
         ]);
 
         if ($hadFailure) {
