@@ -26,6 +26,7 @@ Options:
   --seed <u64>            Master seed (random if omitted)
   --reproducers-dir <dir> Directory for reproducers (default ./reproducers)
   --log-level <level>     Log verbosity (debug, info, notice, warning, error)
+  --display <mode>        Output mode (log, tui)
   --cli-server-hold       Start cli-server and wait indefinitely after boot
   --rr                    Run the target under rr and capture traces on crash signals
   --rr-trace-dir <dir>    Base directory for rr traces (default per-run artifact dir)
@@ -77,6 +78,10 @@ try {
     $redisPort = (int)($parser->get('redis-port', '6379') ?? '6379');
     $reproducersDir = $parser->get('reproducers-dir', 'reproducers') ?? 'reproducers';
     $logLevel = strtolower($parser->get('log-level', 'info') ?? 'info');
+    $display = strtolower($parser->get('display', 'log') ?? 'log');
+    if (!in_array($display, ['log', 'tui'], true)) {
+        throw new InvalidArgumentException('Display mode must be "log" or "tui"');
+    }
     $cliServerHold = $parser->has('cli-server-hold');
     $rr = $parser->has('rr');
     $rrTraceDir = $parser->get('rr-trace-dir');
@@ -91,6 +96,7 @@ try {
         runs: $runs,
         workers: $workers,
         mode: $mode,
+        display: $display,
         rr: $rr,
         rrTraceDir: $rrTraceDir,
         commands: $commands,
@@ -104,7 +110,8 @@ try {
         cliServerHold: $cliServerHold,
     );
 
-    $logger = Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory::create('fuzzer', $logLevel);
+    $logStream = $display === 'tui' ? 'php://null' : null;
+    $logger = Mgrunder\RelayUnifiedDbFuzzer\Support\LoggerFactory::create('fuzzer', $logLevel, $logStream);
     $app = new FuzzerApplication($options, __DIR__, $logger);
     exit($app->run());
 } catch (Throwable $e) {

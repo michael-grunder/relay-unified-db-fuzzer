@@ -14,6 +14,7 @@ final class FuzzerApplication
     private readonly string $runnerScript;
     private readonly string $runsDir;
     private readonly string $reproducersDir;
+    private ?FuzzerStatusDisplay $display = null;
     private int $masterSeed;
     private RedisCommandStats $commandStats;
     /** @var array<string, int>|null */
@@ -43,6 +44,9 @@ final class FuzzerApplication
     {
         $runLimit = $this->options->runs;
         $runLabel = $runLimit < 0 ? 'unlimited' : $runLimit;
+        if ($this->options->display === 'tui') {
+            $this->display = new FuzzerStatusDisplay(microtime(true));
+        }
         $this->captureCommandStatsBaseline();
         $this->logger->info('Starting fuzzer run', [
             'master_seed' => $this->masterSeed,
@@ -57,8 +61,11 @@ final class FuzzerApplication
         for ($runIndex = 0; $runLimit < 0 || $runIndex < $runLimit; $runIndex++) {
             $runSeed = SeedUtil::derive($this->masterSeed, $runIndex);
             $result = $this->runSingle($runIndex, $runSeed);
-            if ($result) {
+            if ($result['had_failure']) {
                 $failures++;
+            }
+            if ($this->display !== null) {
+                $this->display->render($this->buildDisplayState($result, $runIndex + 1, $runLimit, $failures));
             }
         }
 
@@ -70,7 +77,25 @@ final class FuzzerApplication
         return $failures > 0 ? 1 : 0;
     }
 
-    private function runSingle(int $runIndex, int $runSeed): bool
+    /**
+     * @return array{
+     *   had_failure:bool,
+     *   last_seed:int,
+     *   last_exit:int|null,
+     *   last_failures:int,
+     *   cores:int,
+     *   total_commands:int|null,
+     *   command_total:int|null,
+     *   hits:int|null,
+     *   misses:int|null,
+     *   usage_total_requests:int|null,
+     *   usage_max_active_requests:int|null,
+     *   crash_signals:list<string|int>,
+     *   error:string|null,
+     *   error_class:string|null
+     * }
+     */
+    private function runSingle(int $runIndex, int $runSeed): array
     {
         $runId = sprintf('run-%05d', $runIndex);
         $runDir = $this->runsDir . '/' . $runId;
@@ -140,6 +165,10 @@ final class FuzzerApplication
         $coreFiles = $this->collectCoreFiles($pids);
         $hadFailure = ($exitCode !== 0) || $failures > 0 || $coreFiles !== [];
         [$commandStatsTotal, $commandStatsDelta] = $this->captureCommandStatsDelta();
+        $hits = $this->parseNullableInt($relayCacheStats['hits'] ?? null);
+        $misses = $this->parseNullableInt($relayCacheStats['misses'] ?? null);
+        $usageTotal = $this->parseNullableInt($relayUsage['total_requests'] ?? null);
+        $usageMaxActive = $this->parseNullableInt($relayUsage['max_active_requests'] ?? null);
 
         $this->logger->info('Run completed', [
             'run' => $runIndex,
@@ -151,10 +180,10 @@ final class FuzzerApplication
             'crash_signals' => $summary['crash_signals'] ?? [],
             'error' => $summary['error'] ?? null,
             'error_class' => $summary['error_class'] ?? null,
-            'usage_total_requests' => $relayUsage['total_requests'] ?? null,
-            'usage_max_active_requests' => $relayUsage['max_active_requests'] ?? null,
-            'stats_hits' => $relayCacheStats['hits'] ?? null,
-            'stats_misses' => $relayCacheStats['misses'] ?? null,
+            'usage_total_requests' => $usageTotal,
+            'usage_max_active_requests' => $usageMaxActive,
+            'stats_hits' => $hits,
+            'stats_misses' => $misses,
             'ini' => $relayIni,
         ]);
 
@@ -174,7 +203,109 @@ final class FuzzerApplication
             $this->persistReproducer($runIndex, $runSeed, $runDir, $summary ?? [], $command, $coreFiles);
         }
 
-        return $hadFailure;
+        return [
+            'had_failure' => $hadFailure,
+            'last_seed' => $runSeed,
+            'last_exit' => $exitCode,
+            'last_failures' => $failures,
+            'cores' => count($coreFiles),
+            'total_commands' => $commandStatsDelta,
+            'command_total' => $commandStatsTotal,
+            'hits' => $hits,
+            'misses' => $misses,
+            'usage_total_requests' => $usageTotal,
+            'usage_max_active_requests' => $usageMaxActive,
+            'crash_signals' => $summary['crash_signals'] ?? [],
+            'error' => $summary['error'] ?? null,
+            'error_class' => $summary['error_class'] ?? null,
+        ];
+    }
+
+    /**
+     * @param array{
+     *   had_failure:bool,
+     *   last_seed:int,
+     *   last_exit:int|null,
+     *   last_failures:int,
+     *   cores:int,
+     *   total_commands:int|null,
+     *   command_total:int|null,
+     *   hits:int|null,
+     *   misses:int|null,
+     *   usage_total_requests:int|null,
+     *   usage_max_active_requests:int|null,
+     *   crash_signals:list<string|int>,
+     *   error:string|null,
+     *   error_class:string|null
+     * } $runResult
+     * @return array{
+     *   run_limit:int,
+     *   runs_completed:int,
+     *   master_seed:int,
+     *   ops:int,
+     *   workers:int,
+     *   mode:string,
+     *   rr:bool,
+     *   commands:list<string>,
+     *   last_seed:int,
+     *   last_exit:int|null,
+     *   last_failures:int,
+     *   total_failures:int,
+     *   cores:int,
+     *   total_commands:int|null,
+     *   command_total:int|null,
+     *   hits:int|null,
+     *   misses:int|null,
+     *   usage_total_requests:int|null,
+     *   usage_max_active_requests:int|null,
+     *   crash_signals:list<string|int>,
+     *   error:string|null,
+     *   error_class:string|null
+     * }
+     */
+    private function buildDisplayState(array $runResult, int $runsCompleted, int $runLimit, int $totalFailures): array
+    {
+        return [
+            'run_limit' => $runLimit,
+            'runs_completed' => $runsCompleted,
+            'master_seed' => $this->masterSeed,
+            'ops' => $this->options->ops,
+            'workers' => $this->options->workers,
+            'mode' => $this->options->mode,
+            'rr' => $this->options->rr,
+            'commands' => $this->options->commands,
+            'last_seed' => $runResult['last_seed'],
+            'last_exit' => $runResult['last_exit'],
+            'last_failures' => $runResult['last_failures'],
+            'total_failures' => $totalFailures,
+            'cores' => $runResult['cores'],
+            'total_commands' => $runResult['total_commands'],
+            'command_total' => $runResult['command_total'],
+            'hits' => $runResult['hits'],
+            'misses' => $runResult['misses'],
+            'usage_total_requests' => $runResult['usage_total_requests'],
+            'usage_max_active_requests' => $runResult['usage_max_active_requests'],
+            'crash_signals' => $runResult['crash_signals'],
+            'error' => $runResult['error'],
+            'error_class' => $runResult['error_class'],
+        ];
+    }
+
+    private function parseNullableInt(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (int)$value;
+        }
+
+        return null;
     }
 
     private function captureCommandStatsBaseline(): void

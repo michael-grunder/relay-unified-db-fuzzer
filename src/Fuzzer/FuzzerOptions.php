@@ -21,6 +21,7 @@ final class FuzzerOptions
         public readonly int $runs,
         public readonly int $workers,
         public readonly string $mode,
+        public readonly string $display = 'log',
         public readonly bool $rr = false,
         public readonly ?string $rrTraceDir = null,
         public readonly array $commands = [],
