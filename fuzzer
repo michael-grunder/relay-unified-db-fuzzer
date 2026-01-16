@@ -19,6 +19,7 @@ Usage:
 
 Options:
   --commands <csv>        CSV of command families or specific commands to allow
+  --concurrent-requests   Max concurrent cli-server requests (default: --workers)
   --host <host>           CLI server host (default 127.0.0.1)
   --port <port>           CLI server port (default 8080)
   --redis-host <host>     Redis host (default localhost)
@@ -59,6 +60,10 @@ try {
     $ops = $parser->requireInt('ops');
     $runs = $parser->requireInt('runs');
     $workers = $parser->optionalInt('workers', 1) ?? 1;
+    $concurrentRequests = $parser->optionalInt('concurrent-requests', $workers) ?? $workers;
+    if ($concurrentRequests < 1) {
+        throw new InvalidArgumentException('Concurrent requests must be at least 1');
+    }
     $mode = strtolower($parser->require('mode'));
     if (!in_array($mode, ['fork', 'cli-server'], true)) {
         throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
@@ -95,6 +100,7 @@ try {
         ops: $ops,
         runs: $runs,
         workers: $workers,
+        concurrentRequests: $concurrentRequests,
         mode: $mode,
         display: $display,
         rr: $rr,

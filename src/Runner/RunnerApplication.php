@@ -29,6 +29,7 @@ final class RunnerApplication
             'rr' => $this->options->rr,
             'rr_trace_dir' => $this->options->rrTraceDir,
             'log_level' => $this->options->logLevel,
+            'concurrent_requests' => $this->options->concurrentRequests,
             'redis_host' => $this->options->redisHost,
             'redis_port' => $this->options->redisPort,
         ]);
@@ -149,6 +150,7 @@ final class RunnerApplication
             $this->options->host,
             $this->options->port,
             $this->options->workers,
+            $this->options->concurrentRequests,
             $this->options->phpIni,
             $this->options->logLevel,
             $this->options->redisHost,

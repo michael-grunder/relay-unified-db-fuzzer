@@ -16,6 +16,7 @@ final class CliServerModeExecutor
         private readonly string $host,
         private readonly int $port,
         private readonly int $workers,
+        private readonly int $concurrentRequests,
         private readonly ?string $phpIni,
         private readonly string $logLevel,
         private readonly string $redisHost,
@@ -38,6 +39,7 @@ final class CliServerModeExecutor
             'host' => $this->host,
             'port' => $this->port,
             'workers' => $this->workers,
+            'concurrent_requests' => $this->concurrentRequests,
         ]);
         $server = $this->bootServer();
         $pid = $server->getPid() ?: 0;
@@ -76,19 +78,8 @@ final class CliServerModeExecutor
             throw new \RuntimeException($message);
         }
 
-        $failures = 0;
         $requestPayloads = $this->chunkRequests($payload);
-        foreach ($requestPayloads as $chunk) {
-            $encoded = PayloadEncoder::toSerialized($chunk);
-            $result = $this->sendRequest($encoded, $chunk['worker']);
-            if (!$result) {
-                $failures++;
-                if (!$server->isRunning()) {
-                    $this->captureCrashSignals($server);
-                    break;
-                }
-            }
-        }
+        $failures = $this->dispatchRequests($requestPayloads, $server);
 
         $relayStats = $this->fetchRelayStats();
         $this->shutdownServer($server);
@@ -314,6 +305,136 @@ final class CliServerModeExecutor
             'response' => $decoded,
         ]);
         return true;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $requestPayloads
+     */
+    private function dispatchRequests(array $requestPayloads, Process $server): int
+    {
+        if ($this->concurrentRequests <= 1) {
+            return $this->dispatchRequestsSequential($requestPayloads, $server);
+        }
+
+        if (!function_exists('curl_multi_init')) {
+            $this->logger->warning('curl extension missing; falling back to sequential requests');
+            return $this->dispatchRequestsSequential($requestPayloads, $server);
+        }
+
+        return $this->dispatchRequestsConcurrent($requestPayloads, $server);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $requestPayloads
+     */
+    private function dispatchRequestsSequential(array $requestPayloads, Process $server): int
+    {
+        $failures = 0;
+        foreach ($requestPayloads as $chunk) {
+            $encoded = PayloadEncoder::toSerialized($chunk);
+            $result = $this->sendRequest($encoded, $chunk['worker']);
+            if (!$result) {
+                $failures++;
+                if (!$server->isRunning()) {
+                    $this->captureCrashSignals($server);
+                    break;
+                }
+            }
+        }
+
+        return $failures;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $requestPayloads
+     */
+    private function dispatchRequestsConcurrent(array $requestPayloads, Process $server): int
+    {
+        $failures = 0;
+        $endpoint = $this->endpoint('/fuzz.php', $this->buildEndpointQuery());
+        $pending = $requestPayloads;
+        $batchSize = max(1, $this->concurrentRequests);
+
+        while ($pending !== []) {
+            $batch = array_splice($pending, 0, $batchSize);
+            $multiHandle = curl_multi_init();
+            $handles = [];
+
+            foreach ($batch as $chunk) {
+                $payload = PayloadEncoder::toSerialized($chunk);
+                $handle = curl_init();
+                curl_setopt_array($handle, [
+                    CURLOPT_URL => $endpoint,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $payload,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 10,
+                ]);
+
+                curl_multi_add_handle($multiHandle, $handle);
+                $handles[(int)$handle] = [
+                    'handle' => $handle,
+                    'worker' => $chunk['worker'],
+                ];
+            }
+
+            $running = null;
+            do {
+                $status = curl_multi_exec($multiHandle, $running);
+                if ($running) {
+                    $ready = curl_multi_select($multiHandle, 1.0);
+                    if ($ready === -1) {
+                        usleep(10000);
+                    }
+                }
+            } while ($running && $status === CURLM_OK);
+
+            foreach ($handles as $entry) {
+                $handle = $entry['handle'];
+                $worker = $entry['worker'];
+                $response = curl_multi_getcontent($handle);
+                $curlErrno = curl_errno($handle);
+                $curlError = $curlErrno !== 0 ? curl_error($handle) : null;
+                $httpCode = (int)curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+
+                if ($curlErrno !== 0 || $httpCode < 200 || $httpCode >= 300) {
+                    $this->logger->error('Failed to POST payload to cli-server endpoint', [
+                        'endpoint' => $endpoint,
+                        'worker' => $worker,
+                        'http_code' => $httpCode,
+                        'curl_error' => $curlError,
+                    ]);
+                    $failures++;
+                } else {
+                    $decoded = json_decode((string)$response, true);
+                    if (!is_array($decoded) || ($decoded['status'] ?? null) !== 'ok') {
+                        $this->logger->error('CLI server reported failure', [
+                            'response' => $response,
+                            'worker' => $worker,
+                        ]);
+                        $failures++;
+                    } else {
+                        $this->logger->debug('CLI server request completed', [
+                            'worker' => $worker,
+                            'response' => $decoded,
+                        ]);
+                    }
+                }
+
+                curl_multi_remove_handle($multiHandle, $handle);
+                curl_close($handle);
+            }
+
+            curl_multi_close($multiHandle);
+
+            if (!$server->isRunning()) {
+                $this->captureCrashSignals($server);
+                break;
+            }
+        }
+
+        return $failures;
     }
 
     /**

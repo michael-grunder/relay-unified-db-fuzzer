@@ -14,6 +14,7 @@ final class RunnerOptions
         public readonly ?string $phpIni,
         public readonly int $ops,
         public readonly int $workers,
+        public readonly int $concurrentRequests,
         public readonly int $seed,
         public readonly string $mode,
         public readonly ?string $artifactDir,

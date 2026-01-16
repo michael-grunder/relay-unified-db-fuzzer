@@ -53,6 +53,7 @@ final class FuzzerApplication
             'runs' => $runLabel,
             'ops' => $this->options->ops,
             'workers' => $this->options->workers,
+            'concurrent_requests' => $this->options->concurrentRequests,
             'mode' => $this->options->mode,
             'rr' => $this->options->rr,
             'commands' => $this->options->commands,
@@ -377,6 +378,7 @@ final class FuzzerApplication
         }
         $cmd[] = '--ops=' . $this->options->ops;
         $cmd[] = '--workers=' . $this->options->workers;
+        $cmd[] = '--concurrent-requests=' . $this->options->concurrentRequests;
         $cmd[] = '--mode=' . $this->options->mode;
         $cmd[] = '--seed=' . $runSeed;
         $cmd[] = '--artifact-dir=' . $runDir;

@@ -12,7 +12,7 @@ use Mgrunder\RelayUnifiedDbFuzzer\Support\ArgvParser;
 try {
     $parser = new ArgvParser($_SERVER['argv']);
     if ($parser->has('help')) {
-        fwrite(STDERR, "Usage: runner --php <path> --ops <int> --seed <int> [--workers <int>] --mode <fork|cli-server> [--php-ini <path> --redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold --rr --rr-trace-dir <dir>]\n");
+        fwrite(STDERR, "Usage: runner --php <path> --ops <int> --seed <int> [--workers <int>] [--concurrent-requests <int>] --mode <fork|cli-server> [--php-ini <path> --redis-host <host> --redis-port <port> --log-level <level> --cli-server-hold --rr --rr-trace-dir <dir>]\n");
         exit(0);
     }
 
@@ -21,6 +21,10 @@ try {
     $ops = $parser->requireInt('ops');
     $seed = $parser->requireInt('seed');
     $workers = $parser->optionalInt('workers', 1) ?? 1;
+    $concurrentRequests = $parser->optionalInt('concurrent-requests', $workers) ?? $workers;
+    if ($concurrentRequests < 1) {
+        throw new InvalidArgumentException('Concurrent requests must be at least 1');
+    }
     $mode = strtolower($parser->require('mode'));
     if (!in_array($mode, ['fork', 'cli-server'], true)) {
         throw new InvalidArgumentException('Mode must be "fork" or "cli-server"');
@@ -87,6 +91,7 @@ try {
         phpIni: $phpIni,
         ops: $ops,
         workers: $workers,
+        concurrentRequests: $concurrentRequests,
         seed: $seed,
         mode: $mode,
         artifactDir: $artifactDir,
