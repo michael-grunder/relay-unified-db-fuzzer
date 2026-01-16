@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mgrunder\RelayUnifiedDbFuzzer\Fuzzer;
 
+use Mgrunder\RelayUnifiedDbFuzzer\Support\RedisCommandStats;
 use Mgrunder\RelayUnifiedDbFuzzer\Support\SeedUtil;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Process\Process;
@@ -14,6 +15,10 @@ final class FuzzerApplication
     private readonly string $runsDir;
     private readonly string $reproducersDir;
     private int $masterSeed;
+    private RedisCommandStats $commandStats;
+    /** @var array<string, int>|null */
+    private ?array $commandStatsBaseline = null;
+    private ?int $commandStatsBaselineTotal = null;
 
     public function __construct(
         private readonly FuzzerOptions $options,
@@ -31,12 +36,14 @@ final class FuzzerApplication
         }
 
         $this->masterSeed = $options->seed ?? random_int(0, PHP_INT_MAX);
+        $this->commandStats = new RedisCommandStats($options->redisHost, $options->redisPort);
     }
 
     public function run(): int
     {
         $runLimit = $this->options->runs;
         $runLabel = $runLimit < 0 ? 'unlimited' : $runLimit;
+        $this->captureCommandStatsBaseline();
         $this->logger->info('Starting fuzzer run', [
             'master_seed' => $this->masterSeed,
             'runs' => $runLabel,
@@ -132,6 +139,7 @@ final class FuzzerApplication
         $relayIni = is_array($relayStats['ini'] ?? null) ? $relayStats['ini'] : [];
         $coreFiles = $this->collectCoreFiles($pids);
         $hadFailure = ($exitCode !== 0) || $failures > 0 || $coreFiles !== [];
+        [$commandStatsTotal, $commandStatsDelta] = $this->captureCommandStatsDelta();
 
         $this->logger->info('Run completed', [
             'run' => $runIndex,
@@ -139,6 +147,7 @@ final class FuzzerApplication
             'exit' => $exitCode,
             'failures' => $failures,
             'cores' => count($coreFiles),
+            'total_commands' => $commandStatsDelta,
             'crash_signals' => $summary['crash_signals'] ?? [],
             'error' => $summary['error'] ?? null,
             'error_class' => $summary['error_class'] ?? null,
@@ -166,6 +175,56 @@ final class FuzzerApplication
         }
 
         return $hadFailure;
+    }
+
+    private function captureCommandStatsBaseline(): void
+    {
+        $counts = $this->fetchCommandStatsCounts('baseline');
+        if ($counts === null) {
+            return;
+        }
+
+        $this->commandStatsBaseline = $counts;
+        $this->commandStatsBaselineTotal = array_sum($counts);
+
+        $this->logger->info('Captured Redis commandstats baseline', [
+            'commandstats_total' => $this->commandStatsBaselineTotal,
+        ]);
+    }
+
+    /**
+     * @return array{0:int|null, 1:int|null}
+     */
+    private function captureCommandStatsDelta(): array
+    {
+        if ($this->commandStatsBaselineTotal === null) {
+            return [null, null];
+        }
+
+        $counts = $this->fetchCommandStatsCounts('post-run');
+        if ($counts === null) {
+            return [null, null];
+        }
+
+        $currentTotal = array_sum($counts);
+        return [$currentTotal, $currentTotal - $this->commandStatsBaselineTotal];
+    }
+
+    /**
+     * @return array<string, int>|null
+     */
+    private function fetchCommandStatsCounts(string $stage): ?array
+    {
+        try {
+            return $this->commandStats->snapshotCounts();
+        } catch (\Throwable $t) {
+            $this->logger->warning('Failed to capture Redis commandstats', [
+                'stage' => $stage,
+                'exception' => $t,
+            ]);
+        }
+
+        return null;
     }
 
     /**
